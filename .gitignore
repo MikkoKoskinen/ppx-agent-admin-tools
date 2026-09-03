@@ -1,0 +1,8 @@
+# Local-only internal documents; never pushed to GitHub
+/Internal-Docs/
+
+# User's local settings — copied from ppx.settings.example.psd1, holds tenant-specific values
+/ppx.settings.psd1
+
+# VS Code local debug harnesses
+Debug-*.ps1

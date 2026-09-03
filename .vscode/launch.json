@@ -1,0 +1,31 @@
+{
+    // See https://code.visualstudio.com/docs/editor/debugging
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "PPX: Debug Governance Baseline",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "${workspaceFolder}/tools/agent-governance-baseline/Debug-GovernanceBaseline.ps1",
+            "args": [ "-Verbose" ],
+            "cwd": "${workspaceFolder}/tools/agent-governance-baseline"
+        },
+        {
+            // Generic fallback: run whatever .ps1 is in the active editor.
+            // Only useful for scripts that actually invoke something at top level.
+            "name": "PowerShell: Current File",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "${file}",
+            "cwd": "${fileDirname}"
+        },
+        {
+            // Attach breakpoints, F5 this, then call functions by hand in the
+            // PowerShell Integrated Console (e.g. after dot-sourcing a file).
+            "name": "PowerShell: Interactive Session",
+            "type": "PowerShell",
+            "request": "launch",
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

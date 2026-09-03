@@ -3,8 +3,8 @@
 Tenant-wide, one-row-per-agent governance baseline report for published Copilot Studio (V2) agents
 in Power Platform. Part of the [PPX](../../README.md) tool collection.
 
-Full design: `PPX-Solution-Description-Agent-Governance-Baseline.md` (internal planning doc, not
-tracked in this repo).
+Solution and high-level technical description:
+[PPXAgentGovernanceBaseline.md](../../PPXAgentGovernanceBaseline.md).
 
 **Status: Experimental — partial implementation.** Only Inventory API connectivity is built so far.
 Connector-tier resolution, owner resolution, the DLP coverage flag, schema assembly, and export are
@@ -28,7 +28,9 @@ actions — this tool is read-only by design.
 ## Prerequisites
 
 - PowerShell 5.1+ or PowerShell 7.x
-- [`MSAL.PS`](https://www.powershellgallery.com/packages/MSAL.PS) module
+- [`Az.Accounts`](https://www.powershellgallery.com/packages/Az.Accounts) module — used for
+  interactive sign-in and token acquisition against the Power Platform API
+  (`Install-Module Az.Accounts -Scope CurrentUser`)
 - `Microsoft.PowerApps.Administration.PowerShell` module (needed once the DLP coverage flag is
   implemented; not required for the current Inventory API-only functionality)
 - Microsoft Graph PowerShell SDK or Graph REST access (needed once owner resolution is implemented)
@@ -41,13 +43,31 @@ actions — this tool is read-only by design.
 
 ## Usage
 
+First-run setup — the repo ships with no tenant, so set yours (once):
+
+```powershell
+# from the repo root
+Copy-Item ppx.settings.example.psd1 ppx.settings.psd1   # git-ignored
+# then edit ppx.settings.psd1 → Common.TenantId
+```
+
+Then:
+
 ```powershell
 . .\Get-PPXAgentGovernanceBaseline.ps1
 Get-PPXAgentGovernanceBaseline
+# or, without a settings file:
+Get-PPXAgentGovernanceBaseline -TenantId <your-tenant-guid>
 ```
 
-This currently signs in interactively (MSAL) and returns the raw Inventory API response. It does not
-yet produce the final flat report described in the solution description.
+The function throws with setup instructions if no tenant ID is resolved. It currently signs in
+interactively via `Connect-AzAccount` (only when there is no usable Az context) and returns the raw
+Inventory API response. It does not yet produce the final flat report described in the solution
+description.
+
+Tenant selection and other knobs come from the shared settings file — see
+[SETTINGS.md](../../SETTINGS.md), including the **Authentication** section for how the token is
+obtained and the alternative app-registration approach.
 
 ## Known limitations
 
@@ -60,6 +80,6 @@ yet produce the final flat report described in the solution description.
 
 ## Security considerations
 
-- No secrets or credentials are stored in this tool; MSAL handles interactive token acquisition and
-  caching in-memory for the run only.
+- No secrets or credentials are stored in this tool; Az PowerShell handles interactive token
+  acquisition and caching (in the Az context token cache) only.
 - Read-only: no write/remediation operations are performed anywhere in this tool.
