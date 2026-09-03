@@ -7,11 +7,12 @@ Solution and high-level technical description:
 [PPXAgentGovernanceBaseline.md](../../PPXAgentGovernanceBaseline.md).
 
 **Status: Experimental — partial implementation.** Inventory API connectivity, schema assembly, and
-CSV export are built. Connector-tier resolution, owner resolution, and the DLP coverage flag are not
-yet implemented (see inline `# TODO` markers in `private/*.ps1`), so `OwnerName`, `OwnerUPN`,
+CSV export are built — 43 columns per agent, most field paths confirmed against a live tenant
+response on 2026-09-03. Connector-tier resolution, owner resolution, and the DLP coverage flag are
+not yet implemented (see inline `# TODO` markers in `private/*.ps1`), so `OwnerName`, `OwnerUPN`,
 `OwnerAccountStatus`, `PremiumConnectorCount`, and `HasZeroDlpCoverage` are blank in every row.
-A handful of other columns (`SchemaName`, `LastPublishedAt`, `IsQuarantined`, `IdentityModel`) use
-best-guess field paths that have not yet been confirmed against a live tenant response — see
+`IdentityModel`'s "Legacy Entra app" / "None" branches, and the item shape of `Channels`/`Triggers`/
+`Flows` for populated arrays, are still inferred rather than confirmed — see
 [Known limitations](#known-limitations).
 
 ## Purpose
@@ -24,10 +25,13 @@ across multiple screens or not surfaced in the UI at all.
 
 - Governance-lead intake report at the start of an agent governance engagement.
 - Identifying agents with disabled/orphaned owners, zero DLP coverage, or no authentication.
+- Identifying agents shared with the entire tenant, built via CLI/GitHub Copilot rather than Copilot
+  Studio, or using an unexpected model.
 
 Not yet supported (planned, see solution description): connector-tier detail, DLP policy detail,
-V1/classic bots, publishing-channel detail, historical trend data, and any write/remediation
-actions — this tool is read-only by design.
+V1/classic bots, full publishing-channel configuration detail (basic channel/trigger/flow counts and
+identifiers are included), historical trend data, and any write/remediation actions — this tool is
+read-only by design.
 
 ## Prerequisites
 
@@ -90,14 +94,19 @@ obtained and the alternative app-registration approach.
   supported cleanly by the platform at time of writing (see solution description §10).
 - `OwnerName`, `OwnerUPN`, `OwnerAccountStatus`, `PremiumConnectorCount`, and `HasZeroDlpCoverage` are
   blank in every row — the Graph owner lookup, connector-tier resolution, and DLP coverage flag are
-  not implemented yet.
+  not implemented yet. The raw `OwnerId` GUID is included in the meantime.
 - `EnvironmentGroup` is blank — not currently projected by the Inventory API query.
-- `SchemaName`, `LastPublishedAt`, `IsQuarantined`, and `IdentityModel` use best-guess field paths
-  that have not been confirmed against a live tenant response (no sample was captured during
-  development). If a report shows these as blank/`Unknown` for every row, the tool will also print a
-  `Write-Warning` calling this out — treat that as a signal to inspect
-  `$raw.data[0] | ConvertTo-Json -Depth 10` (via `Connect-PPXInventoryApi`) and correct the paths in
-  `private\ConvertTo-PPXGovernanceRow.ps1`.
+- `IdentityModel`'s `"Entra Agent ID/Blueprint"` value is confirmed (from `entraAgentId`/
+  `entraAgentBlueprintId` presence); its `"Legacy Entra app"` / `"None"` branches are inferred from
+  `AuthenticationMode` alone, since no live example of either case has been seen yet. If it comes back
+  blank/`Unknown` for every row, the tool prints a `Write-Warning` calling that out.
+- `Channels`, `Triggers`, and `Flows` list basic identifiers only; their item shape for **populated**
+  arrays is unconfirmed — only an empty-array example has been seen for all three so far, so the
+  label-extraction logic in `ConvertTo-PPXArraySummary.ps1` is a best-effort guess. If you see one with
+  real entries, share it so the extraction can be tightened.
+- `CapabilitiesTruncated` compares the actual `powerPlatformConnectors` array length against the
+  reported distinct-connector count (`capabilitiesCounts.distinctPowerPlatformConnectors`) — Microsoft
+  does not document an exact truncation cap, so this is a relative signal, not a fixed threshold.
 - Every run's specific gaps (including the above) are restated in the `.limitations.txt` file written
   alongside the CSV, so the report is self-describing without needing this README.
 

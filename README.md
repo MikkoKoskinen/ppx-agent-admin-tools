@@ -6,13 +6,14 @@ Independent open-source tools, scripts, and small apps that extend Power Platfor
 ### [Agent Governance Baseline](tools/agent-governance-baseline) — *experimental*
 
 The opening artifact for a Power Platform agent governance engagement: one command produces one
-flat, exportable table with a row per published Copilot Studio (V2) agent, tenant-wide. Every column
-is something the Power Platform admin center either doesn't show in its agent list at all or
-requires manual cross-screen navigation to assemble — owner name and account status (the
-leaver/orphan signal), environment and managed-environment context, authentication mode,
-orchestration type, distinct and premium connector counts, a zero-DLP-coverage flag, publish
-staleness, quarantine state — with every known data limitation stated in the output itself.
-Read-only and point-in-time.
+flat, exportable table (43 columns) with a row per published Copilot Studio (V2) agent, tenant-wide.
+Every column is something the Power Platform admin center either doesn't show in its agent list at
+all or requires manual cross-screen navigation to assemble — owner name and account status (the
+leaver/orphan signal), environment and managed-environment context, authentication and identity
+posture, orchestration type, build origin (creation surface, harness, model, CLI/GitHub Copilot
+flags), distinct and premium connector counts, channel/trigger/flow counts, content composition,
+tenant-wide sharing exposure, a zero-DLP-coverage flag, publish staleness, quarantine state — with
+every known data limitation stated in the output itself. Read-only and point-in-time.
 
 **Status:** partial implementation. Inventory API connectivity, schema assembly, and CSV export
 (`Get-PPXAgentGovernanceBaseline`) work end-to-end and write a governance-baseline CSV plus a
@@ -96,6 +97,7 @@ ppx-agent-admin-tools/
 │     └─ private/                              Internal step scripts, dot-sourced at run time.
 │        ├─ Connect-PPXInventoryApi.ps1        Auth + Inventory API query.
 │        ├─ ConvertTo-PPXGovernanceRow.ps1     Shapes one record into a §5 report row.
+│        ├─ ConvertTo-PPXArraySummary.ps1      Count + label summary for array fields (channels, etc.).
 │        ├─ Get-PPXNestedValue.ps1             Safe dotted-path property reader.
 │        └─ Export-PPXReport.ps1               Writes the CSV + limitations sidecar.
 └─ .vscode/                    Debug configurations (see Development).

@@ -11,7 +11,10 @@ function Get-PPXNestedValue {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)] $InputObject,
+        # AllowNull is required: PowerShell rejects an explicit $null bound to a Mandatory parameter
+        # otherwise, and callers legitimately pass $null here (e.g. a sub-object like
+        # properties.componentsCounts that doesn't exist on every agent record).
+        [Parameter(Mandatory)] [AllowNull()] $InputObject,
         [Parameter(Mandatory)] [string] $Path,
         $Default = $null
     )

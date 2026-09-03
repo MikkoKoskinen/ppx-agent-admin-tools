@@ -41,9 +41,11 @@ It is a point-in-time, **read-only** report. It performs no write or remediation
 ### In scope
 
 - Published Copilot Studio **V2** agents, all environments in the tenant.
-- Environment context, ownership, authentication/identity posture, orchestration type, a summary
-  connector count with a premium sub-count, a zero-DLP-coverage flag, publish staleness, quarantine
-  state.
+- Environment context, ownership, authentication/identity posture, orchestration type, build origin
+  (creation surface, harness, model, CLI/GitHub Copilot flags), a summary connector count with a
+  premium sub-count, channel/trigger/flow counts, content composition (topics/tools/knowledge/
+  connected-agent counts), tenant-wide sharing exposure, a zero-DLP-coverage flag, publish staleness,
+  quarantine state.
 
 ### Out of scope (by design, this phase)
 
@@ -58,32 +60,106 @@ It is a point-in-time, **read-only** report. It performs no write or remediation
 
 ## 5. Report schema
 
-One row per published V2 agent.
+One row per published V2 agent, 43 columns. Field paths marked **confirmed** were checked against a
+live tenant response on 2026-09-03 (see `CHANGELOG.md`); **inferred** means no live example of that
+branch/case has been seen yet.
+
+An initial pass had 51 columns; 8 were cut as low-value-on-their-own after review: `EntraAgentBlueprintId`
+and `CreatedByUserId` (both redundant — `IdentityModel`/`EntraAgentId` and `OwnerId` already carry the
+useful signal), `ConnectorOperationsCount` (operation-level detail, not a governance signal by itself),
+`EnvironmentRegion` (bonus column, not core governance data), and the four sharing sub-counts
+`SharedViewerUserCount`/`SharedViewerGroupCount`/`SharedEditorUserCount`/`SharedEditorGroupCount`
+(the actionable signal is `SharedWithEntireTenant`; per-count detail matters only for a specific
+follow-up investigation, not a tenant-wide scan). `EntraAgentId` and `InstructionsCharactersCount` were
+kept despite being in the same review groups.
+
+### Identity / location
 
 | Column | Source | Notes |
 | --- | --- | --- |
-| `AgentName` | Inventory `properties.displayName` | |
+| `AgentName` | Inventory `properties.displayName` | confirmed |
 | `AgentId` | Inventory `name` | |
-| `SchemaName` | Inventory (Copilot Studio agent schema) | |
+| `SchemaName` | Inventory `properties.schemaName` | confirmed |
 | `EnvironmentName` | Inventory, environment join | |
-| `EnvironmentId` | Inventory `properties.environmentId` | |
+| `EnvironmentId` | Inventory `properties.environmentId` | confirmed |
 | `EnvironmentType` | Inventory, environment join | Production / Sandbox / Trial / Developer / Default / Dataverse-for-Teams |
 | `IsManagedEnvironment` | Inventory, environment join | |
-| `EnvironmentGroup` | Inventory, environment join | Blank if unassigned |
-| `OwnerName` / `OwnerUPN` | Microsoft Graph lookup on `ownerId` | |
-| `OwnerAccountStatus` | Microsoft Graph lookup | Active / Disabled / NotFound — the leaver/orphan signal |
-| `CreatedAt` | Inventory `properties.createdAt` | |
-| `LastPublishedAt` | Inventory (agent-specific field) | |
-| `StalenessBucket` | Calculated | `<6mo` / `6–12mo` / `12–24mo` / `>24mo` since last publish |
-| `AuthenticationMode` | Inventory `properties.authentication` | Flagged separately when "none" |
-| `IdentityModel` | Inventory | Entra Agent ID/Blueprint present vs. legacy Entra app only vs. neither |
-| `OrchestrationType` | Inventory `properties.orchestration` | |
-| `DistinctConnectorCount` | Calculated from `properties.powerPlatformConnectors` | |
-| `PremiumConnectorCount` | Calculated, joined to connector catalog tier | |
-| `HasZeroDlpCoverage` | Calculated against DLP policy connector lists for the agent's environment | Boolean flag only |
-| `CapabilitiesTruncated` | Inventory `capabilitiesCounts` vs. the 200-item cap | Data-completeness warning |
-| `IsQuarantined` | Inventory | |
-| `ChannelDataAvailable` | Static `false` | Documented gap — see [Known limitations](#8-known-limitations) |
+| `EnvironmentGroup` | Inventory, environment join | Blank — not currently projected by the query, see §8 |
+
+### Ownership
+
+| Column | Source | Notes |
+| --- | --- | --- |
+| `OwnerName` / `OwnerUPN` | Microsoft Graph lookup on `ownerId` | Blank — `Resolve-PPXOwnerIdentity` not implemented yet |
+| `OwnerAccountStatus` | Microsoft Graph lookup | Blank — same as above. Active / Disabled / NotFound is the leaver/orphan signal once implemented |
+| `OwnerId` | Inventory `properties.ownerId` | confirmed. Raw GUID, usable before Graph resolution exists |
+
+### Lifecycle
+
+| Column | Source | Notes |
+| --- | --- | --- |
+| `CreatedAt` | Inventory `properties.createdAt` | confirmed. Normalised to ISO 8601 |
+| `LastPublishedAt` | Inventory `properties.lastPublishedAt` | confirmed (was guessed as `lastPublishedOn` before live verification — wrong) |
+| `StalenessBucket` | Calculated from `LastPublishedAt` | `<6mo` / `6-12mo` / `12-24mo` / `>24mo` |
+| `IsQuarantined` | Inventory `properties.isQuarantined` | confirmed |
+
+### Authentication / identity
+
+| Column | Source | Notes |
+| --- | --- | --- |
+| `AuthenticationMode` | Inventory `properties.authentication` | confirmed. Observed value: `"Microsoft Entra"` |
+| `IdentityModel` | Derived | `"Entra Agent ID/Blueprint"` confirmed from `entraAgentId`/`entraAgentBlueprintId` presence; `"Legacy Entra app"` / `"None"` branches inferred from `AuthenticationMode` alone |
+| `EntraAgentId` | Inventory `properties.entraAgentId` | confirmed |
+
+### Build origin
+
+| Column | Source | Notes |
+| --- | --- | --- |
+| `CreatedIn` | Inventory `properties.createdIn` | confirmed. Observed value: `"Copilot Studio"` |
+| `Harness` | Inventory `properties.harness` | confirmed. Observed value: `"GitHub Copilot"` |
+| `Model` | Inventory `properties.model` | confirmed. Observed value: `"GPT-5.6 Reasoning"` |
+| `OrchestrationType` | Inventory `properties.orchestration` | confirmed. Observed value: `"Generative"` |
+| `IsCLIAgent` | Inventory `properties.isCLIAgent` | confirmed |
+| `IsGithubCopilotAgent` | Inventory `properties.isGithubCopilotAgent` | confirmed |
+| `IsManagedAgent` | Inventory `properties.isManaged` | confirmed. Agent-level flag — distinct from `IsManagedEnvironment` (environment-level), both exist and mean different things |
+
+### Connectivity / automation surface
+
+| Column | Source | Notes |
+| --- | --- | --- |
+| `DistinctConnectorCount` | Inventory `properties.capabilitiesCounts.distinctPowerPlatformConnectors` | confirmed. Authoritative; falls back to counting `powerPlatformConnectors` manually if `capabilitiesCounts` is absent |
+| `PremiumConnectorCount` | Calculated, joined to connector catalog tier | Blank — `Resolve-PPXConnectorTier` not implemented yet |
+| `CapabilitiesTruncated` | Calculated: actual `powerPlatformConnectors` array length vs. reported `distinctPowerPlatformConnectors` | Data-completeness warning; the exact cap (if any) isn't documented by Microsoft |
+| `ChannelsCount` / `Channels` | Inventory `properties.channels` | Array; only an empty example seen so far, so item-label extraction is unconfirmed for populated arrays |
+| `TriggersCount` / `Triggers` | Inventory `properties.triggers` | Same caveat as `Channels` |
+| `FlowsCount` / `Flows` | Inventory `properties.flows` | Same caveat as `Channels` |
+
+### Composition / content
+
+| Column | Source | Notes |
+| --- | --- | --- |
+| `TopicsCount` | Inventory `properties.componentsCounts.topics` | confirmed |
+| `ToolsCount` | Inventory `properties.componentsCounts.tools` | confirmed |
+| `KnowledgeCount` | Inventory `properties.componentsCounts.knowledge` | confirmed |
+| `ConnectedAgentsCount` | Inventory `properties.componentsCounts.connectedAgents` | confirmed |
+| `InstructionsCharactersCount` | Inventory `properties.instructionsCharactersCount` | confirmed |
+| `IsWebSearchEnabledForKnowledge` | Inventory `properties.isWebSearchEnabledForKnowledge` | confirmed |
+
+### Sharing exposure
+
+| Column | Source | Notes |
+| --- | --- | --- |
+| `SharedWithEntireTenant` | Inventory `properties.sharedWithViewers.entireTenant` | confirmed. Whether the agent is shared with everyone in the tenant |
+
+### Governance flags pending future enrichment
+
+| Column | Source | Notes |
+| --- | --- | --- |
+| `HasZeroDlpCoverage` | Calculated against DLP policy connector lists for the agent's environment | Blank — `Get-PPXDlpCoverageFlag` not implemented yet |
+
+`ChannelDataAvailable` (previously a hardcoded `false` "documented gap" placeholder) has been removed:
+live testing showed `properties.channels` genuinely exists and is queryable, so the placeholder was
+factually wrong. `ChannelsCount`/`Channels` replace it.
 
 ## 6. Technical design (high level)
 
@@ -177,24 +253,28 @@ numeric `0` as "unset" placeholders — `$false` is kept as a real value.
 | --- | --- |
 | Settings resolution, tenant enforcement, orchestration skeleton | Done |
 | `Connect-PPXInventoryApi` — auth + agents/environments query | Done, returns raw `data[]` |
-| Schema assembly (§5) incl. calculated columns | Done for Inventory-sourced/calculated columns (17 of 20 named columns, plus a bonus `EnvironmentRegion`); `EnvironmentGroup`, `OwnerName`/`OwnerUPN`/`OwnerAccountStatus`, `PremiumConnectorCount`, `HasZeroDlpCoverage` are blank pending the steps below |
+| Schema assembly (§5) incl. calculated columns | Done for Inventory-sourced/calculated columns (37 of 43 columns populated); `EnvironmentGroup`, `OwnerName`/`OwnerUPN`/`OwnerAccountStatus`, `PremiumConnectorCount`, `HasZeroDlpCoverage` are blank pending the steps below |
 | `Export-PPXReport` — CSV + `.limitations.txt` sidecar | Done |
 | `Resolve-PPXConnectorTier` | Not started (stub) — feeds `PremiumConnectorCount` |
-| `Resolve-PPXOwnerIdentity` | Not started (stub) — feeds `OwnerName`/`OwnerUPN`/`OwnerAccountStatus` |
+| `Resolve-PPXOwnerIdentity` | Not started (stub) — feeds `OwnerName`/`OwnerUPN`/`OwnerAccountStatus` (raw `OwnerId`/`CreatedByUserId` GUIDs are already included) |
 | `Get-PPXDlpCoverageFlag` | Not started (stub) — feeds `HasZeroDlpCoverage` |
 
-Build order so far: Inventory API connectivity → Inventory-only schema assembly and CSV export.
-Remaining: connector catalog resolution → owner resolution → DLP boolean, wired into the same
-`ConvertTo-PPXGovernanceRow` assembly step.
+Build order so far: Inventory API connectivity → Inventory-only schema assembly and CSV export →
+field-path confirmation against a live tenant. Remaining: connector catalog resolution → owner
+resolution → DLP boolean, wired into the same `ConvertTo-PPXGovernanceRow` assembly step.
 
-**Field-path caveat:** `SchemaName`, `LastPublishedAt`, `IsQuarantined`, and `IdentityModel` are
-implemented against best-guess field paths — no live Inventory API response has yet been captured and
-inspected to confirm them (see `tools\agent-governance-baseline\private\ConvertTo-PPXGovernanceRow.ps1`).
-`Export-PPXReport` prints a `Write-Warning` if any of these come back blank/`Unknown` for every row in
-a run, as a signal to confirm the real paths via `Connect-PPXInventoryApi` and
-`$raw.data[0] | ConvertTo-Json -Depth 10` and correct the mapping. `EnvironmentGroup` is also blank —
-the current Inventory API query's environment `project` clause (`Connect-PPXInventoryApi.ps1`) does
-not project it; adding it is a tracked follow-up rather than a guess against the working query.
+**Field-path confirmation (2026-09-03):** most of §5 was checked against a real tenant response and
+corrected where wrong — `LastPublishedAt`'s guessed path (`lastPublishedOn`) was **wrong**, the real
+field is `properties.lastPublishedAt`; `SchemaName` and `IsQuarantined` guesses were confirmed
+correct; `IdentityModel` is now derived from confirmed `entraAgentId`/`entraAgentBlueprintId`
+presence (though its "Legacy Entra app" / "None" branches are still inferred, no live example of
+either seen yet); `CapabilitiesTruncated` was rebuilt around the real `capabilitiesCounts` shape
+(three named counts, not a generic 200-item dictionary check) and now compares the actual returned
+connector array length against the reported count instead of guessing at a hardcoded cap.
+`EnvironmentGroup` remains blank — the current Inventory API query's environment `project` clause
+(`Connect-PPXInventoryApi.ps1`) does not project it; adding it is a tracked follow-up rather than a
+guess against the working query. `Channels`/`Triggers`/`Flows` item-shape (for populated arrays) is
+still unconfirmed — only an empty-array example has been seen for all three so far.
 
 ## 8. Known limitations
 
@@ -202,12 +282,13 @@ Stated here and, once export exists, in every report run:
 
 - Reflects **published** agent state only; unpublished draft changes are invisible.
 - **V1 / Classic** agents are excluded — not present in the Inventory API.
-- Connector and capability arrays cap at 200 items per agent; `CapabilitiesTruncated` flags when the
-  cap is hit.
+- `CapabilitiesTruncated` flags when the actual `powerPlatformConnectors` array returned is shorter
+  than the reported distinct-connector count; Microsoft does not document an exact cap.
 - Up to ~15 minutes of replication latency between a real-world change and inventory reflecting it.
 - `HasZeroDlpCoverage` is a coverage boolean, not policy detail — not a substitute for a DLP audit.
-- Channel / publishing-surface data is not available through this report — explicitly marked, not
-  silently omitted.
+- `Channels`/`Triggers`/`Flows` list basic identifiers only (and their item shape is unconfirmed for
+  populated arrays — only empty examples have been seen); full publishing-channel configuration
+  detail is not available through this report.
 - Several source fields are Microsoft **Preview** status and may change shape without notice.
 - Authentication is interactive delegated only; unattended auth is not supported against this
   endpoint at time of writing.

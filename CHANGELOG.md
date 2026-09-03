@@ -63,6 +63,74 @@ as a real finding) in every row.
   `$settings.ContainsKey(...)` rather than truthiness, since truthiness alone still can't tell "unset"
   apart from "explicitly false."
 
+### Agent Governance Baseline — field-path confirmation + expanded schema (46 → 51 columns)
+
+Confirmed the §5 schema against a live tenant `properties` response for the first time (no sample had
+ever been captured in this repo before) and corrected/expanded the mapping accordingly.
+
+- **Corrected:** `LastPublishedAt`'s guessed path (`properties.lastPublishedOn`) was wrong — the real
+  field is `properties.lastPublishedAt`.
+- **Confirmed correct:** `SchemaName` (`properties.schemaName`) and `IsQuarantined`
+  (`properties.isQuarantined`) guesses matched the real paths exactly.
+- **`IdentityModel`** is now derived from confirmed `entraAgentId`/`entraAgentBlueprintId` presence
+  (`"Entra Agent ID/Blueprint"`); the `"Legacy Entra app"` / `"None"` branches remain inferred from
+  `AuthenticationMode` alone pending a live example of either case.
+- **`CapabilitiesTruncated`/connector counts rebuilt:** `properties.capabilitiesCounts` turned out to
+  be three specific named counts (`distinctPowerPlatformConnectors`,
+  `distinctPowerPlatformConnectorsOperations`, `distinctFlows`), not a generic dictionary to
+  threshold-check against a 200-item cap as previously guessed. `DistinctConnectorCount` now sources
+  from `capabilitiesCounts.distinctPowerPlatformConnectors` (falling back to manually counting the
+  `powerPlatformConnectors` array, keyed on the confirmed `connectorId` field, only if
+  `capabilitiesCounts` is absent). `CapabilitiesTruncated` now compares the actual returned connector
+  array length against the reported distinct count — a real, data-driven truncation signal — instead
+  of a fabricated `-ge 200` heuristic that had no basis in any observed data.
+- **`ChannelDataAvailable` (hardcoded `$false`) removed** — factually wrong. `properties.channels` is
+  real and queryable (confirmed empty in the one live example seen). Replaced with `ChannelsCount` /
+  `Channels`, plus the analogous `TriggersCount`/`Triggers` and `FlowsCount`/`Flows` the user
+  requested. Item shape for *populated* channel/trigger/flow arrays is still unconfirmed (only empty
+  examples seen), so label extraction (`ConvertTo-PPXArraySummary.ps1`, new) is defensive: tries
+  `displayName`/`name`/`type`/`id`, falls back to a compact JSON dump of the item.
+- **New columns**, all confirmed against the live response: `CreatedIn`, `Harness`, `Model`,
+  `IsCLIAgent`, `IsGithubCopilotAgent`, `IsManagedAgent` (agent-level flag, distinct from the
+  environment-level `IsManagedEnvironment` — both exist and mean different things), `EntraAgentId`,
+  `EntraAgentBlueprintId`, `OwnerId`, `CreatedByUserId` (raw GUIDs, usable before Graph owner
+  resolution exists), `ConnectorOperationsCount`, `TopicsCount`, `ToolsCount`, `KnowledgeCount`,
+  `ConnectedAgentsCount`, `InstructionsCharactersCount`, `IsWebSearchEnabledForKnowledge`,
+  `SharedWithEntireTenant`, `SharedViewerUserCount`, `SharedViewerGroupCount`,
+  `SharedEditorUserCount`, `SharedEditorGroupCount`.
+- **Bug fix — `Get-PPXNestedValue.ps1`:** found via testing against records missing optional
+  sub-objects (e.g. no `componentsCounts`). Its `$InputObject` parameter was `Mandatory` without
+  `[AllowNull()]`, and PowerShell rejects an explicit `$null` bound to a Mandatory parameter — so
+  calling it with a genuinely-missing nested object (exactly the case it's meant to handle) threw
+  `Cannot bind argument to parameter 'InputObject' because it is null` instead of returning the
+  default. Added `[AllowNull()]`.
+- **`Export-PPXReport.ps1`** sanity-check list trimmed from 6 columns to just `IdentityModel` (the one
+  remaining column still built on an inferred, not confirmed, rule); the static limitations text was
+  corrected to match (no more "channel data unavailable" claim, no more fabricated 200-item cap
+  claim).
+- **`PPXAgentGovernanceBaseline.md`** §5 schema table rewritten with per-column confirmed/inferred
+  status; §7/§8 updated to match.
+
+### Agent Governance Baseline — schema trimmed (51 → 43 columns)
+
+Reviewed the 51-column schema for columns that were low-value on their own, and removed 8 based on
+user selection:
+
+- `EntraAgentBlueprintId`, `CreatedByUserId` — redundant; `IdentityModel`/`EntraAgentId` and `OwnerId`
+  already carry the useful signal. `EntraAgentId` and `OwnerId` themselves were kept.
+- `ConnectorOperationsCount` — operation-level detail, not a governance signal on its own once
+  `DistinctConnectorCount` exists.
+- `SharedViewerUserCount`, `SharedViewerGroupCount`, `SharedEditorUserCount`, `SharedEditorGroupCount`
+  — the actionable governance signal is `SharedWithEntireTenant` (kept); per-count detail only matters
+  for a specific follow-up investigation, not a tenant-wide scan.
+- `EnvironmentRegion` — bonus column outside the original governance scope.
+
+`InstructionsCharactersCount` was reviewed alongside `ConnectorOperationsCount`/`EnvironmentRegion` but
+kept. `ConvertTo-PPXGovernanceRow.ps1`'s internal `$entraAgentBlueprintId`/`$sharedWithViewers`
+variables are still computed where still needed (e.g. `IdentityModel` derivation, `SharedWithEntireTenant`)
+even though their own columns were dropped. `Export-PPXReport.ps1`'s limitations text updated to drop
+the stale `CreatedByUserId` mention.
+
 ## [0.1.0] — 2026-09-03
 
 First working version of the **Agent Governance Baseline** tool (Inventory API connectivity only),

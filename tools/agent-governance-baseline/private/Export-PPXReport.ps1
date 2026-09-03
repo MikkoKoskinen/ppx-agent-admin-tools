@@ -46,11 +46,12 @@ function Export-PPXReport {
     $records = @($Inventory.data)
     $rows = @($records | ConvertTo-PPXGovernanceRow)
 
-    # Columns that are either blank-by-design (pending a future enrichment step) or a best-guess
-    # field path unverified against a live tenant. If one of the guessed/calculated columns is
-    # blank/Unknown across every row, that's a strong signal the guessed path is wrong -- surface it
-    # loudly rather than let it go unnoticed until someone reads the CSV closely.
-    $sanityCheckColumns = @('SchemaName', 'LastPublishedAt', 'StalenessBucket', 'IsQuarantined', 'IdentityModel', 'DistinctConnectorCount')
+    # Columns still built on an inferred (not directly-confirmed) rule. Most field paths were
+    # confirmed against a live tenant response on 2026-09-03 (see CHANGELOG.md) and were dropped
+    # from this list; IdentityModel's "Legacy Entra app" / "None" branches are still inferred from
+    # AuthenticationMode alone, since no live example of either case has been seen yet. If it comes
+    # back blank/Unknown for every row, that's a signal to revisit the derivation.
+    $sanityCheckColumns = @('IdentityModel')
     $sanityWarnings = @()
     if ($rows.Count -gt 0) {
         foreach ($column in $sanityCheckColumns) {
@@ -84,19 +85,20 @@ function Export-PPXReport {
         'Documented limitations (PPXAgentGovernanceBaseline.md §8):'
         '- Reflects published agent state only; unpublished draft changes are invisible.'
         '- V1 / Classic (Power Virtual Agents) bots are excluded -- not present in the Inventory API.'
-        '- Connector and capability arrays cap at 200 items per agent; CapabilitiesTruncated flags when the cap is hit.'
+        '- The reported distinct connector count (capabilitiesCounts) is compared against the actual powerPlatformConnectors array to flag truncation (CapabilitiesTruncated); the exact cap, if any, is not documented by Microsoft.'
         '- Up to ~15 minutes of replication latency between a real-world change and inventory reflecting it.'
         '- HasZeroDlpCoverage (when populated) is a coverage boolean only, not policy detail.'
-        '- Channel / publishing-surface data is not available through this report.'
+        '- Channels/Triggers/Flows list basic identifiers only; full publishing-channel configuration detail is not available through this report.'
         '- Several source fields are Microsoft Preview status and may change shape without notice.'
         '- Authentication is interactive delegated only; unattended auth is not supported against this endpoint.'
         ''
         'This report pass (Inventory-only, no Graph/DLP/connector-catalog enrichment):'
-        '- OwnerName, OwnerUPN, OwnerAccountStatus are blank -- owner resolution (Resolve-PPXOwnerIdentity) is not implemented yet.'
+        '- OwnerName, OwnerUPN, OwnerAccountStatus are blank -- owner resolution (Resolve-PPXOwnerIdentity) is not implemented yet. The raw OwnerId GUID is included instead.'
         '- PremiumConnectorCount is blank -- connector-tier resolution (Resolve-PPXConnectorTier) is not implemented yet.'
         '- HasZeroDlpCoverage is blank -- DLP coverage resolution (Get-PPXDlpCoverageFlag) is not implemented yet.'
         '- EnvironmentGroup is blank -- not currently projected by the Inventory API query.'
-        '- SchemaName, LastPublishedAt, IsQuarantined, and IdentityModel use unverified/best-guess source paths, not yet confirmed against a live tenant response.'
+        '- Channels/Triggers/Flows item labels are extracted defensively (name/displayName/type/id, falling back to raw JSON) -- no populated example of any of the three has been seen yet, only empty arrays, so the extraction logic is unconfirmed for real items.'
+        '- IdentityModel: "Entra Agent ID/Blueprint" is confirmed from entraAgentId/entraAgentBlueprintId presence; the "Legacy Entra app" / "None" branches are inferred from AuthenticationMode alone and not yet confirmed against a live example of either case.'
     )
 
     if ($sanityWarnings.Count -gt 0) {
