@@ -14,7 +14,11 @@ function Get-PPXSettings {
 
         Returns a hashtable of the Common section merged with the requested tool
         section, where the tool section wins on key collisions. Keys whose value
-        is '' or 0 are dropped, so a caller can treat "present" as "set".
+        is $null, '', or numeric 0 are dropped, so a caller can treat "present" as
+        "set". $false is NOT dropped — it is a meaningful value for boolean
+        settings whose default is $true (e.g. AgentGovernanceBaseline.ExportReport),
+        so callers overriding such a setting must check $settings.ContainsKey(...)
+        rather than relying on truthiness.
 
         Callers should still let an explicit parameter override the returned
         value; this function only supplies the "no parameter given" fallback.
@@ -56,9 +60,15 @@ function Get-PPXSettings {
     }
 
     # Drop "unset" placeholders so callers can test with a simple truthiness check.
+    # $false is deliberately NOT treated as unset here: unlike '' and 0, it is a real,
+    # distinguishable value (PowerShell's -eq would otherwise coerce $false -eq 0 to $true and
+    # silently discard an explicit "off" for a boolean whose default is $true).
     foreach ($key in @($merged.Keys)) {
         $value = $merged[$key]
-        if ($null -eq $value -or $value -eq '' -or $value -eq 0) { $merged.Remove($key) }
+        $isUnset = ($null -eq $value) -or
+                   ($value -is [string] -and $value -eq '') -or
+                   (($value -is [int] -or $value -is [double]) -and $value -eq 0)
+        if ($isUnset) { $merged.Remove($key) }
     }
 
     return $merged

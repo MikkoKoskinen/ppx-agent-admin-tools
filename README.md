@@ -14,9 +14,11 @@ orchestration type, distinct and premium connector counts, a zero-DLP-coverage f
 staleness, quarantine state — with every known data limitation stated in the output itself.
 Read-only and point-in-time.
 
-**Status:** partial implementation. Inventory API connectivity (`Connect-PPXInventoryApi`) works and
-returns the raw agent + environment records; connector-tier resolution, owner resolution, the DLP
-coverage flag, schema assembly, and CSV/Excel export are not built yet. See the
+**Status:** partial implementation. Inventory API connectivity, schema assembly, and CSV export
+(`Get-PPXAgentGovernanceBaseline`) work end-to-end and write a governance-baseline CSV plus a
+`.limitations.txt` sidecar. Connector-tier resolution, owner resolution, and the DLP coverage flag are
+not built yet, so `OwnerName`/`OwnerUPN`/`OwnerAccountStatus`, `PremiumConnectorCount`, and
+`HasZeroDlpCoverage` are blank in every row. See the
 [tool README](tools/agent-governance-baseline/README.md) and the `# TODO` markers in its
 `private/*.ps1`.
 
@@ -42,6 +44,11 @@ First run opens an interactive sign-in (`Connect-AzAccount`); later runs reuse t
 context. If the browser prompt doesn't complete (common inside the VS Code debugger), set
 `Common.UseDeviceAuthentication = $true` in `ppx.settings.psd1` — see
 [SETTINGS.md](SETTINGS.md#authentication).
+
+The command above writes a CSV report (plus a `.limitations.txt` sidecar) to `reports\` at the repo
+root (git-ignored) and returns the shaped rows. Set `AgentGovernanceBaseline.OutputPath` to choose
+where it lands, or `AgentGovernanceBaseline.ExportReport = $false` to skip writing to disk entirely
+and just get the rows back — see [SETTINGS.md](SETTINGS.md#current-keys).
 
 ## Prerequisites
 
@@ -81,11 +88,16 @@ ppx-agent-admin-tools/
 ├─ SETTINGS.md                 Settings + authentication reference.
 ├─ PPXAgentGovernanceBaseline.md   Solution + high-level technical description.
 ├─ CHANGELOG.md                Technical change history.
+├─ reports/                    Generated CSV reports + .limitations.txt sidecars (git-ignored).
 ├─ tools/
 │  ├─ _shared/                 Helpers shared by every tool (e.g. Get-PPXSettings.ps1).
 │  └─ agent-governance-baseline/
 │     ├─ Get-PPXAgentGovernanceBaseline.ps1   Entry-point function.
 │     └─ private/                              Internal step scripts, dot-sourced at run time.
+│        ├─ Connect-PPXInventoryApi.ps1        Auth + Inventory API query.
+│        ├─ ConvertTo-PPXGovernanceRow.ps1     Shapes one record into a §5 report row.
+│        ├─ Get-PPXNestedValue.ps1             Safe dotted-path property reader.
+│        └─ Export-PPXReport.ps1               Writes the CSV + limitations sidecar.
 └─ .vscode/                    Debug configurations (see Development).
 ```
 

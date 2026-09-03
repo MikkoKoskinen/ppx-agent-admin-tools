@@ -6,3 +6,6 @@
 
 # VS Code local debug harnesses
 Debug-*.ps1
+
+# Generated tenant-specific reports (CSV + limitations sidecar)
+/reports/

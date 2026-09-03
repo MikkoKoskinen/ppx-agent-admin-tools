@@ -5,8 +5,10 @@ run it, see [tools/agent-governance-baseline/README.md](tools/agent-governance-b
 for settings and authentication, [SETTINGS.md](SETTINGS.md); for the technical change history,
 [CHANGELOG.md](CHANGELOG.md).
 
-**Status:** experimental. Inventory API connectivity is implemented and working; enrichment,
-schema assembly, and export are not built yet — see [Implementation status](#implementation-status).
+**Status:** experimental. Inventory API connectivity, schema assembly, and CSV export are implemented
+and working. Owner resolution, DLP coverage, and connector-tier resolution are not built yet, so five
+columns are blank in every row, and a few other columns use unverified best-guess field paths — see
+[Implementation status](#implementation-status).
 
 ---
 
@@ -147,14 +149,27 @@ Exact request/response mechanics and the pitfalls resolved during implementation
 
 ### 6.5 Output
 
-A flat table exported as CSV (and optionally a formatted Excel workbook), one row per agent, with a
-**known-limitations block appended to every run** so the report is self-describing.
+A flat table exported as CSV, one row per agent. Rather than appending limitations prose into the CSV
+itself (which would conflict with §3's "no post-processing" goal — a plain CSV has no comment syntax,
+so stray non-tabular rows would misalign under the real headers or need manual deletion before
+pivoting), each run writes **two files**: `<name>.csv` (pure tabular data) and a sibling
+`<name>.limitations.txt` sidecar carrying the static §8 limitations plus this run's dynamic notes
+(row count vs. `totalRecords`, `resultTruncated`, which columns are blank-by-design this pass, and any
+automatic warnings about likely-wrong field-path guesses). The same summary is echoed to the console.
+A formatted Excel workbook is not implemented (plain CSV opens directly in Excel with no extra
+dependency).
 
 ### 6.6 Configuration
 
 All runtime knobs come from the shared settings file (`ppx.settings.psd1`, section
-`AgentGovernanceBaseline`, falling back to `Common`): tenant ID (required), page size, auth mode.
-Precedence is explicit parameter → settings file → tool/API default. See [SETTINGS.md](SETTINGS.md).
+`AgentGovernanceBaseline`, falling back to `Common`): tenant ID (required), page size, auth mode,
+output path, and whether to export the report at all (`ExportReport`, default `$true` — set to
+`$false` to only build and return the shaped rows in memory). Precedence is explicit parameter →
+settings file → tool/API default. See [SETTINGS.md](SETTINGS.md).
+
+Note: `ExportReport` is a boolean whose *default* is `$true`, so an explicit `$false` in the settings
+file must be distinguishable from "not set." `Get-PPXSettings` therefore only drops `$null`, `''`, and
+numeric `0` as "unset" placeholders — `$false` is kept as a real value.
 
 ## 7. Implementation status
 
@@ -162,14 +177,24 @@ Precedence is explicit parameter → settings file → tool/API default. See [SE
 | --- | --- |
 | Settings resolution, tenant enforcement, orchestration skeleton | Done |
 | `Connect-PPXInventoryApi` — auth + agents/environments query | Done, returns raw `data[]` |
-| `Resolve-PPXConnectorTier` | Not started (stub) |
-| `Resolve-PPXOwnerIdentity` | Not started (stub) |
-| `Get-PPXDlpCoverageFlag` | Not started (stub) |
-| Schema assembly (§5) incl. calculated columns | Not started |
-| `Export-PPXReport` + appended limitations block | Not started |
+| Schema assembly (§5) incl. calculated columns | Done for Inventory-sourced/calculated columns (17 of 20 named columns, plus a bonus `EnvironmentRegion`); `EnvironmentGroup`, `OwnerName`/`OwnerUPN`/`OwnerAccountStatus`, `PremiumConnectorCount`, `HasZeroDlpCoverage` are blank pending the steps below |
+| `Export-PPXReport` — CSV + `.limitations.txt` sidecar | Done |
+| `Resolve-PPXConnectorTier` | Not started (stub) — feeds `PremiumConnectorCount` |
+| `Resolve-PPXOwnerIdentity` | Not started (stub) — feeds `OwnerName`/`OwnerUPN`/`OwnerAccountStatus` |
+| `Get-PPXDlpCoverageFlag` | Not started (stub) — feeds `HasZeroDlpCoverage` |
 
-Build order: connector catalog resolution → owner resolution → DLP boolean → schema assembly and
-export.
+Build order so far: Inventory API connectivity → Inventory-only schema assembly and CSV export.
+Remaining: connector catalog resolution → owner resolution → DLP boolean, wired into the same
+`ConvertTo-PPXGovernanceRow` assembly step.
+
+**Field-path caveat:** `SchemaName`, `LastPublishedAt`, `IsQuarantined`, and `IdentityModel` are
+implemented against best-guess field paths — no live Inventory API response has yet been captured and
+inspected to confirm them (see `tools\agent-governance-baseline\private\ConvertTo-PPXGovernanceRow.ps1`).
+`Export-PPXReport` prints a `Write-Warning` if any of these come back blank/`Unknown` for every row in
+a run, as a signal to confirm the real paths via `Connect-PPXInventoryApi` and
+`$raw.data[0] | ConvertTo-Json -Depth 10` and correct the mapping. `EnvironmentGroup` is also blank —
+the current Inventory API query's environment `project` clause (`Connect-PPXInventoryApi.ps1`) does
+not project it; adding it is a tracked follow-up rather than a guess against the working query.
 
 ## 8. Known limitations
 

@@ -12,7 +12,9 @@
 #     with Import-PowerShellDataFile, which never executes code.
 #   - An explicit parameter passed on the command line always wins over a value
 #     set here. A value set here always wins over the tool/API default.
-#   - Leave a value as '' (empty string), 0, or $false to mean "not set — use the default".
+#   - Leave a value as '' (empty string) or 0 to mean "not set — use the default".
+#   - $false is a real value, not an "unset" placeholder — for a setting whose default is $true
+#     (e.g. AgentGovernanceBaseline.ExportReport), setting it to $false here genuinely turns it off.
 #   - A key in a tool section overrides the same key in Common for that tool.
 #
 @{
@@ -43,5 +45,14 @@
 
         # Page size passed to the Inventory API query. 0 = use the API default.
         Top = 0
+
+        # Where the CSV report (and its .limitations.txt sidecar) is written. A folder path
+        # auto-names a timestamped file into it; a path ending in .csv is used as-is.
+        # '' = use the default reports\ folder at the repo root (git-ignored).
+        OutputPath = ''
+
+        # Whether to write the CSV report (and its .limitations.txt sidecar) to disk.
+        # $false means: only build and return the shaped rows in memory, write nothing to disk.
+        ExportReport = $true
     }
 }

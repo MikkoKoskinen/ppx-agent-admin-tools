@@ -55,7 +55,9 @@ with a message telling you to do the copy. You can also bypass the file entirely
   (`tools/agent-governance-baseline` → `AgentGovernanceBaseline`). A key here overrides the same key
   in `Common` **for that tool only**.
 - Leave a value as `''` (empty string) or `0` to mean *"not set — use the default"*. The loader drops
-  those, so a tool treats them as absent.
+  those, so a tool treats them as absent. `$false` is **not** dropped — it's a real value, which
+  matters for a boolean setting whose default is `$true` (e.g. `ExportReport` below): setting it to
+  `$false` genuinely turns the behavior off, rather than being read as "unset."
 
 ## How a value is resolved
 
@@ -90,6 +92,8 @@ Get-PPXAgentGovernanceBaseline -Top 50         # Top = 50 (override); TenantId s
 | --- | --- | --- | --- |
 | `TenantId` | string | *(inherits `Common`)* | Override the tenant for just this tool. |
 | `Top` | int | `0` | Page size for the Inventory API query. `0` = API default. |
+| `OutputPath` | string | `''` | Where the CSV report (+ `.limitations.txt` sidecar) is written. A folder path auto-names a timestamped file into it; a path ending in `.csv` is used as-is. `''` = the repo-root `reports\` folder (git-ignored). |
+| `ExportReport` | bool | `$true` | Whether to write the CSV report to disk. `$false` = only build and return the shaped rows in memory, write nothing to disk. |
 
 ## Authentication
 
@@ -188,13 +192,26 @@ if (-not $PSBoundParameters.ContainsKey('Top')      -and $settings.Top)      { $
   fallback),
 - caches the parsed file for the session (`-Refresh` re-reads it),
 - returns `Common` merged with the requested `-Section` (section wins on collisions),
-- removes keys whose value is `''`, `0`, or `$null`, so `if ($settings.X)` is a safe presence check.
+- removes keys whose value is `''`, `0`, or `$null`, so `if ($settings.X)` is a safe presence check
+  for most settings. `$false` is kept, **not** removed.
+
+That last point matters for a boolean parameter whose *default* is `$true` (e.g. `-ExportReport`):
+a plain truthiness check can't tell "not set in the file" apart from "explicitly set to `$false`," so
+use `ContainsKey` instead of truthiness for those:
+
+```powershell
+if (-not $PSBoundParameters.ContainsKey('ExportReport') -and $settings.ContainsKey('ExportReport')) {
+    $ExportReport = [bool] $settings.ExportReport
+}
+```
 
 ## Adding a setting
 
 1. Add the key to the right section in **`ppx.settings.example.psd1`**, with a comment and a safe
    default.
-2. In the tool, read it via `Get-PPXSettings` using the "parameter wins" pattern above.
+2. In the tool, read it via `Get-PPXSettings` using the "parameter wins" pattern above. If it's a
+   boolean whose default is `$true`, use `ContainsKey` instead of truthiness — see
+   [Using settings from a tool](#using-settings-from-a-tool-for-contributors).
 3. Document it in the **Current keys** tables here.
 
 ## Adding a new tool

@@ -9,6 +9,60 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are 
 
 ---
 
+## [Unreleased]
+
+### Agent Governance Baseline — schema assembly and CSV export
+
+`Get-PPXAgentGovernanceBaseline` now writes a governance-baseline CSV (plus a sidecar
+`.limitations.txt` file) instead of returning the raw Inventory API response. This is an
+**Inventory-only** pass: owner resolution, DLP coverage, and connector-tier resolution
+(`Resolve-PPXOwnerIdentity`, `Get-PPXDlpCoverageFlag`, `Resolve-PPXConnectorTier`) remain
+unimplemented, so `OwnerName`/`OwnerUPN`/`OwnerAccountStatus`, `PremiumConnectorCount`, and
+`HasZeroDlpCoverage` are blank (`''`, never `$false`/`0`/`'Unknown'`, to avoid a blank being misread
+as a real finding) in every row.
+
+- **`tools/agent-governance-baseline/private/Get-PPXNestedValue.ps1`** — new. Safe dotted-path reader
+  (`'properties.createdAt'`) used for every field lookup; returns a default instead of throwing or
+  mis-shaping the result when an intermediate segment is missing or turns out to be a collection.
+- **`tools/agent-governance-baseline/private/ConvertTo-PPXGovernanceRow.ps1`** — new. Maps one joined
+  Inventory API record to a flat §5 row. `SchemaName`, `LastPublishedAt`, `IsQuarantined`, and
+  `IdentityModel` use best-guess field paths — **no live Inventory API response has been captured and
+  inspected in this repo**, so these are unverified; correct them here once confirmed against a real
+  tenant. `EnvironmentGroup` is blank because the current `Connect-PPXInventoryApi` query doesn't
+  project it (left as a follow-up rather than guessing at a change to the working query).
+- **`tools/agent-governance-baseline/private/Export-PPXReport.ps1`** — rewritten from a stub. Resolves
+  an output path (folder → auto-named timestamped file, or an explicit `.csv` path), writes the CSV
+  with `Export-Csv -Encoding utf8BOM` on PS7+ / `UTF8` on 5.1 (PS7's default `UTF8` omits the BOM,
+  which makes Excel mis-render accented characters), and writes a `.limitations.txt` sidecar (static
+  §8 items + this run's dynamic notes) rather than appending prose into the CSV, since a CSV has no
+  comment syntax and stray rows would conflict with the "no post-processing" goal (§3). Also runs a
+  same-run sanity check: if a best-guess/calculated column is blank/zero/`'Unknown'` across every row,
+  it `Write-Warning`s and logs it in the sidecar, so a wrong guessed path surfaces automatically
+  instead of requiring someone to notice.
+- **`Get-PPXAgentGovernanceBaseline.ps1`** — new `-OutputPath` parameter (same
+  parameter-then-settings-fallback pattern as `-TenantId`/`-Top`); now calls `Export-PPXReport` and
+  returns the shaped rows instead of the raw inventory envelope.
+- **`ppx.settings.example.psd1`** — added `AgentGovernanceBaseline.OutputPath` (blank = default
+  `reports\` folder at the repo root).
+- **`.gitignore`** — added `/reports/` (generated, tenant-specific CSV + limitations output).
+
+### Agent Governance Baseline — `ExportReport` opt-out setting
+
+- **`Get-PPXAgentGovernanceBaseline.ps1`** — new `-ExportReport` parameter (`[bool]`, default `$true`).
+  When `$false`, the function still queries the Inventory API and shapes the rows, but skips writing
+  the CSV / `.limitations.txt` sidecar entirely and just returns the rows in memory.
+- **`ppx.settings.example.psd1`** / **`ppx.settings.psd1`** — added
+  `AgentGovernanceBaseline.ExportReport = $true`.
+- **`tools/_shared/Get-PPXSettings.ps1`** — fixed the "unset" drop logic. It previously dropped any
+  setting value that compared equal to `0`, which in PowerShell also matches `$false`
+  (`$false -eq 0` is `$true`) — so an explicit `ExportReport = $false` in the settings file would have
+  been silently discarded and treated as "not set," defeating a default-`$true`-but-overridable-false
+  setting. Now only `$null`, `''`, and genuinely numeric `0` are treated as unset; `$false` (and
+  `$true`) always survive. The settings-file header comments in both `.psd1` files were updated to
+  match. `Get-PPXAgentGovernanceBaseline.ps1`'s settings fallback for `ExportReport` uses
+  `$settings.ContainsKey(...)` rather than truthiness, since truthiness alone still can't tell "unset"
+  apart from "explicitly false."
+
 ## [0.1.0] — 2026-09-03
 
 First working version of the **Agent Governance Baseline** tool (Inventory API connectivity only),
