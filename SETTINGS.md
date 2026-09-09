@@ -91,9 +91,23 @@ Get-PPXAgentGovernanceBaseline -Top 50         # Top = 50 (override); TenantId s
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `TenantId` | string | *(inherits `Common`)* | Override the tenant for just this tool. |
-| `Top` | int | `0` | Page size for the Inventory API query. `0` = API default. |
+| `Top` | int | `0` | Rows fetched **per Inventory API request** (1–1000; higher is clamped — the API returns at most 1000 per page). `0` = default (1000). Does **not** cap the total: the tool follows `skipToken` paging until every agent record is retrieved. |
+| `MaxPages` | int | `0` | Safety cap on how many Inventory API pages (requests) to follow. `0` = no cap (retrieve everything). Set a small value for a quick partial pull while testing — the report is then flagged **INCOMPLETE** in its `.limitations.txt` sidecar. |
 | `OutputPath` | string | `''` | Where the CSV report (+ `.limitations.txt` sidecar) is written. A folder path auto-names a timestamped file into it; a path ending in `.csv` is used as-is. `''` = the repo-root `reports\` folder (git-ignored). |
 | `ExportReport` | bool | `$true` | Whether to write the CSV report to disk. `$false` = only build and return the shaped rows in memory, write nothing to disk. |
+
+### `CustomConnectorUsage` — [`tools/custom-connector-usage`](tools/custom-connector-usage)
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `TenantId` | string | *(inherits `Common`)* | Override the tenant for just this tool. |
+| `Top` | int | `0` | Rows fetched **per Inventory API request** (1–1000; higher is clamped). `0` = default (1000). Does **not** cap the total: `skipToken` paging retrieves every connector-emitting resource. |
+| `MaxPages` | int | `0` | Safety cap on Inventory API pages **per query**. `0` = no cap. A small value gives a quick partial pull while testing — the report is then flagged **INCOMPLETE**. |
+| `MaxEnvironments` | int | `0` | Cap on how many environments the per-environment connector lookup (connectivity API) runs against. `0` = all. A small value speeds up a test run; the report is then flagged **PARTIAL** in its `.limitations.txt` sidecar. |
+| `SkipEnvironmentConnectorLookup` | bool | `$false` | `$true` = skip the per-environment connectivity calls entirely. Fast, but the report is then built from the Inventory usage heuristic alone: only custom connectors a resource references appear, `IsCustomApi` is `"Inferred"`, `ExistsInEnvironmentList` is `"Unknown"`. |
+| `OutputPath` | string | `''` | Where the CSV report (+ `.limitations.txt` sidecar) is written. Folder path auto-names a timestamped file; a `.csv` path is used as-is. `''` = the repo-root `reports\` folder (git-ignored). |
+| `ExportReport` | bool | `$true` | Whether to write the CSV report to disk. `$false` = only build and return the shaped rows in memory. |
+| `IncludeAllEnvironments` | bool | `$false` | `$true` = also emit one placeholder row (blank `ConnectorId`) for every environment that has **no** custom connectors, so the CSV doubles as a "confirmed clean" list. `$false` = only rows for environments with ≥ 1 custom connector. |
 
 ## Authentication
 

@@ -5,16 +5,16 @@ function Export-PPXReport {
         to a CSV, plus a sidecar known-limitations text file.
     .DESCRIPTION
         Takes the whole Inventory API response envelope (not just .data) because totalRecords /
-        resultTruncated feed the limitations file: if -Top capped the result and paging isn't
-        implemented, the report would otherwise be silently incomplete.
+        resultTruncated / pagesRetrieved feed the limitations file: if skipToken paging was cut
+        short (-MaxPages or the hard safety cap), the report would otherwise be silently incomplete.
 
         Writes two files rather than appending prose into the CSV: a plain CSV has no comment
         syntax, so non-tabular rows appended below the data would misalign under the real headers
         or force the user to delete rows before pivoting/filtering in Excel — against the tool's own
         goal of needing no post-processing. See PPXAgentGovernanceBaseline.md §6.5.
     .PARAMETER Inventory
-        The raw response object returned by Connect-PPXInventoryApi
-        ({ totalRecords, count, resultTruncated, skipToken, data[] }).
+        The response object returned by Connect-PPXInventoryApi, synthesised from all retrieved
+        pages: { totalRecords, count, resultTruncated, skipToken, pagesRetrieved, data[] }.
     .PARAMETER Path
         Optional. A folder to auto-name a timestamped CSV into, or a full path ending in .csv.
         Defaults to the repo-root reports\ folder (git-ignored).
@@ -74,10 +74,21 @@ function Export-PPXReport {
         "PPX Agent Governance Baseline -- known limitations for this report"
         "Generated: $(Get-Date -Format 'o')"
         "Rows exported: $($rows.Count) of $($Inventory.totalRecords) total agent record(s) in the tenant."
-        ''
     )
+    if ($null -ne $Inventory.pagesRetrieved) {
+        $limitationsLines += "Inventory API pages retrieved (skipToken paging): $($Inventory.pagesRetrieved)."
+    }
+    $limitationsLines += ''
+
     if ($Inventory.resultTruncated) {
-        $limitationsLines += "*** resultTruncated = true -- the Inventory API did not return every record for this query (see -Top / paging). This report is INCOMPLETE. ***"
+        $limitationsLines += "*** resultTruncated = true -- the Inventory API did not return every record for this query. This report is INCOMPLETE. ***"
+        if ($Inventory.skipToken) {
+            $limitationsLines += "Paging stopped early with a continuation token still pending -- most likely -MaxPages / AgentGovernanceBaseline.MaxPages capped the run. Re-run without that cap for a complete report."
+        }
+        $limitationsLines += ''
+    }
+    elseif ($Inventory.totalRecords -and $rows.Count -lt [int64] $Inventory.totalRecords) {
+        $limitationsLines += "NOTE: $($rows.Count) row(s) exported but the tenant reports $($Inventory.totalRecords) agent record(s). All pages were retrieved, so the difference is rows dropped during shaping (join/filter), not API truncation."
         $limitationsLines += ''
     }
 

@@ -212,13 +212,19 @@ The endpoint takes a structured query object (not a KQL or SQL string) which the
 to Kusto and runs against Azure Resource Graph:
 
 - `POST https://api.powerplatform.com/resourcequery/resources/query?api-version=2024-10-01`
-- Body: `{ TableName: "PowerPlatformResources", Options: { Top, Skip }, Clauses: [ … ] }`.
+- Body: `{ TableName: "PowerPlatformResources", Options: { Top, Skip, SkipToken }, Clauses: [ … ] }`.
 - `Clauses` is an ordered list of typed operations (`extend`, `join`, `where`, `project`,
   `orderby`, …); the `$type` discriminator must be the first property of each clause object.
 - The baseline query mirrors PPAC's own default pattern: derive a lowercased environment join key,
   `leftouter`-join every resource to its environment record, then filter to
-  `microsoft.copilotstudio/agents`, ordered by creation date.
+  `microsoft.copilotstudio/agents`, ordered by creation date (with a `name` tie-breaker so
+  `skipToken` paging is deterministic).
 - Response envelope: `{ totalRecords, count, resultTruncated, skipToken, data[] }`.
+- **Paging**: Azure Resource Graph returns at most 1000 rows per request plus a `skipToken` when
+  more remain. `Connect-PPXInventoryApi` loops, feeding each `skipToken` back into
+  `Options.SkipToken`, until none is returned — so tenants with more than 1000 agents are fully
+  retrieved. `Top` is the per-request page size only; `MaxPages` (default 0 = unlimited) caps the
+  loop and marks the report incomplete when it bites.
 
 Exact request/response mechanics and the pitfalls resolved during implementation are in
 [CHANGELOG.md](CHANGELOG.md).
@@ -238,10 +244,11 @@ dependency).
 ### 6.6 Configuration
 
 All runtime knobs come from the shared settings file (`ppx.settings.psd1`, section
-`AgentGovernanceBaseline`, falling back to `Common`): tenant ID (required), page size, auth mode,
-output path, and whether to export the report at all (`ExportReport`, default `$true` — set to
-`$false` to only build and return the shaped rows in memory). Precedence is explicit parameter →
-settings file → tool/API default. See [SETTINGS.md](SETTINGS.md).
+`AgentGovernanceBaseline`, falling back to `Common`): tenant ID (required), page size (`Top`), paging
+cap (`MaxPages`, default `0` = retrieve everything), auth mode, output path, and whether to export the
+report at all (`ExportReport`, default `$true` — set to `$false` to only build and return the shaped
+rows in memory). Precedence is explicit parameter → settings file → tool/API default. See
+[SETTINGS.md](SETTINGS.md).
 
 Note: `ExportReport` is a boolean whose *default* is `$true`, so an explicit `$false` in the settings
 file must be distinguishable from "not set." `Get-PPXSettings` therefore only drops `$null`, `''`, and
@@ -252,7 +259,7 @@ numeric `0` as "unset" placeholders — `$false` is kept as a real value.
 | Component | State |
 | --- | --- |
 | Settings resolution, tenant enforcement, orchestration skeleton | Done |
-| `Connect-PPXInventoryApi` — auth + agents/environments query | Done, returns raw `data[]` |
+| `Connect-PPXInventoryApi` — auth + agents/environments query | Done; follows `skipToken` paging to retrieve all records, returns synthesised envelope + `data[]` |
 | Schema assembly (§5) incl. calculated columns | Done for Inventory-sourced/calculated columns (37 of 43 columns populated); `EnvironmentGroup`, `OwnerName`/`OwnerUPN`/`OwnerAccountStatus`, `PremiumConnectorCount`, `HasZeroDlpCoverage` are blank pending the steps below |
 | `Export-PPXReport` — CSV + `.limitations.txt` sidecar | Done |
 | `Resolve-PPXConnectorTier` | Not started (stub) — feeds `PremiumConnectorCount` |

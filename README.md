@@ -26,6 +26,26 @@ not built yet, so `OwnerName`/`OwnerUPN`/`OwnerAccountStatus`, `PremiumConnector
 Solution and high-level technical description:
 [PPXAgentGovernanceBaseline.md](PPXAgentGovernanceBaseline.md).
 
+### [Custom Connector Usage](tools/custom-connector-usage) — *experimental*
+
+Tenant-wide view of which Power Platform environments have **custom connectors** — one command
+produces one flat, exportable table with a row per `(environment × custom connector)`. It covers
+both custom connectors an app/flow/agent references *and* custom connectors that merely exist in an
+environment (created or imported but not yet used), each row carrying environment basic details
+(name, type, managed flag, environment group, region), connector display name / publisher / tier,
+whether the classification is authoritative or inferred, whether the connector list for that
+environment was actually retrieved, and which apps/flows/agents consume it. Read-only and
+point-in-time.
+
+**Status:** experimental. Both Inventory API pulls (environments, connector-emitting resources) and
+the per-environment connectivity-API connector lookup (`Get-PPXCustomConnectorUsage`) are
+implemented and wired end-to-end, writing a CSV plus a `.limitations.txt` sidecar. The connectivity
+`$filter` contract is from community reports, not an official Microsoft example — confirm it on the
+first full run. See the [tool README](tools/custom-connector-usage/README.md).
+
+Solution and high-level technical description:
+[PPXCustomConnectorUsage.md](PPXCustomConnectorUsage.md).
+
 ## Quick start
 
 ```powershell
@@ -87,26 +107,40 @@ Copy-Item ppx.settings.example.psd1 ppx.settings.psd1
 ppx-agent-admin-tools/
 ├─ ppx.settings.example.psd1   Settings template (committed). Copy to ppx.settings.psd1.
 ├─ SETTINGS.md                 Settings + authentication reference.
-├─ PPXAgentGovernanceBaseline.md   Solution + high-level technical description.
+├─ PPXAgentGovernanceBaseline.md   Solution + high-level technical description (Agent Governance Baseline).
+├─ PPXCustomConnectorUsage.md      Solution + high-level technical description (Custom Connector Usage).
 ├─ CHANGELOG.md                Technical change history.
 ├─ reports/                    Generated CSV reports + .limitations.txt sidecars (git-ignored).
 ├─ tools/
 │  ├─ _shared/                 Helpers shared by every tool (e.g. Get-PPXSettings.ps1).
-│  └─ agent-governance-baseline/
-│     ├─ Get-PPXAgentGovernanceBaseline.ps1   Entry-point function.
+│  ├─ agent-governance-baseline/
+│  │  ├─ Get-PPXAgentGovernanceBaseline.ps1   Entry-point function.
+│  │  └─ private/                              Internal step scripts, dot-sourced at run time.
+│  │     ├─ Connect-PPXInventoryApi.ps1        Auth + Inventory API query.
+│  │     ├─ ConvertTo-PPXGovernanceRow.ps1     Shapes one record into a §5 report row.
+│  │     ├─ ConvertTo-PPXArraySummary.ps1      Count + label summary for array fields (channels, etc.).
+│  │     ├─ Get-PPXNestedValue.ps1             Safe dotted-path property reader.
+│  │     └─ Export-PPXReport.ps1               Writes the CSV + limitations sidecar.
+│  └─ custom-connector-usage/
+│     ├─ Get-PPXCustomConnectorUsage.ps1      Entry-point function.
 │     └─ private/                              Internal step scripts, dot-sourced at run time.
-│        ├─ Connect-PPXInventoryApi.ps1        Auth + Inventory API query.
-│        ├─ ConvertTo-PPXGovernanceRow.ps1     Shapes one record into a §5 report row.
-│        ├─ ConvertTo-PPXArraySummary.ps1      Count + label summary for array fields (channels, etc.).
-│        ├─ Get-PPXNestedValue.ps1             Safe dotted-path property reader.
-│        └─ Export-PPXReport.ps1               Writes the CSV + limitations sidecar.
+│        ├─ Get-PPXPowerPlatformToken.ps1     Az sign-in + delegated token (shared by the two APIs).
+│        ├─ Connect-PPXInventoryApi.ps1       Query-agnostic Inventory API wrapper + skipToken paging.
+│        ├─ Get-PPXEnvironmentConnector.ps1   Connectivity API: connectors that exist in one environment.
+│        ├─ Get-PPXNormalizedConnectorKey.ps1 Normalises connector IDs so the two APIs' forms match.
+│        ├─ Test-PPXCustomConnectorId.ps1     ID-shape custom-connector heuristic (fallback).
+│        ├─ ConvertTo-PPXConnectorUsageRow.ps1  Merges existence + usage into one row per (env × connector).
+│        ├─ Get-PPXNestedValue.ps1            Safe dotted-path property reader.
+│        ├─ ConvertTo-PPXJoinedList.ps1       Caps a list into one '; '-joined CSV cell.
+│        └─ Export-PPXReport.ps1              Writes the CSV + limitations sidecar.
 └─ .vscode/                    Debug configurations (see Development).
 ```
 
 ## Development
 
-- Debugging in VS Code: open the Run and Debug panel, pick **PPX: Debug Governance Baseline**, and
-  press F5. It runs a small harness (`Debug-*.ps1`, git-ignored) that dot-sources the entry-point
-  function and calls it, so breakpoints in the function and `private/*.ps1` are hit.
+- Debugging in VS Code: open the Run and Debug panel, pick **PPX: Debug Governance Baseline** or
+  **PPX: Debug Custom Connector Usage**, and press F5. Each runs a small harness (`Debug-*.ps1`,
+  git-ignored) that dot-sources the entry-point function and calls it, so breakpoints in the
+  function and `private/*.ps1` are hit.
 - Adding a setting or a new tool: see the contributor sections in [SETTINGS.md](SETTINGS.md).
 - Technical history of changes: [CHANGELOG.md](CHANGELOG.md).

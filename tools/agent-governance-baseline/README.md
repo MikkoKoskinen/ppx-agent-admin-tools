@@ -70,7 +70,15 @@ Get-PPXAgentGovernanceBaseline -TenantId <your-tenant-guid>
 Get-PPXAgentGovernanceBaseline -OutputPath C:\reports\my-tenant.csv
 # or, to skip writing a CSV entirely and just get the shaped rows back:
 Get-PPXAgentGovernanceBaseline -ExportReport:$false
+# or, for a quick partial pull while testing (stops after N Inventory API pages):
+Get-PPXAgentGovernanceBaseline -MaxPages 1
 ```
+
+**Large tenants:** the Inventory API returns at most 1000 rows per request. The tool follows the
+`skipToken` continuation automatically and retrieves every agent, however many there are — `-Top`
+(or `AgentGovernanceBaseline.Top`) only sets the per-request page size, it does not cap the total.
+`-MaxPages` / `AgentGovernanceBaseline.MaxPages` (default `0` = unlimited) can cap the paging loop;
+when it does, the `.limitations.txt` sidecar marks the report **INCOMPLETE**.
 
 The function throws with setup instructions if no tenant ID is resolved. It signs in interactively
 via `Connect-AzAccount` (only when there is no usable Az context), writes a governance-baseline CSV

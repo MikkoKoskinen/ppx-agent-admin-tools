@@ -20,8 +20,14 @@ function Get-PPXAgentGovernanceBaseline {
         (or AgentGovernanceBaseline.TenantId) in ppx.settings.psd1. The function throws if neither
         is set; no tenant is ever baked into the repo.
     .PARAMETER Top
-        Optional page size passed through to the Inventory API query.
-        Defaults to the settings file (AgentGovernanceBaseline.Top).
+        Optional page size (rows per request, 1-1000) passed through to the Inventory API query.
+        This does not cap the total — the tool follows skipToken paging until every agent record has
+        been retrieved. Defaults to the settings file (AgentGovernanceBaseline.Top).
+    .PARAMETER MaxPages
+        Optional cap on how many Inventory API pages to follow. 0 (default) means retrieve
+        everything. Set a small value for a quick partial pull while testing; the report is then
+        flagged INCOMPLETE in its .limitations.txt sidecar. Defaults to the settings file
+        (AgentGovernanceBaseline.MaxPages).
     .PARAMETER UseDeviceAuthentication
         Sign in with device-code flow instead of the interactive browser prompt. Set this (or
         Common.UseDeviceAuthentication in the settings file) when running under the VS Code debugger,
@@ -49,6 +55,8 @@ function Get-PPXAgentGovernanceBaseline {
 
         [int] $Top,
 
+        [int] $MaxPages,
+
         [switch] $UseDeviceAuthentication,
 
         [string] $OutputPath,
@@ -67,6 +75,7 @@ function Get-PPXAgentGovernanceBaseline {
     $settings = Get-PPXSettings -Section 'AgentGovernanceBaseline'
     if (-not $PSBoundParameters.ContainsKey('TenantId') -and $settings.TenantId) { $TenantId = $settings.TenantId }
     if (-not $PSBoundParameters.ContainsKey('Top') -and $settings.Top) { $Top = $settings.Top }
+    if (-not $PSBoundParameters.ContainsKey('MaxPages') -and $settings.MaxPages) { $MaxPages = $settings.MaxPages }
     if (-not $PSBoundParameters.ContainsKey('UseDeviceAuthentication') -and $settings.UseDeviceAuthentication) {
         $UseDeviceAuthentication = [bool] $settings.UseDeviceAuthentication
     }
@@ -91,6 +100,7 @@ No tenant ID configured. This tool never ships with a tenant baked in — set yo
     $connectParams = @{}
     if ($TenantId) { $connectParams['TenantId'] = $TenantId }
     if ($Top) { $connectParams['Top'] = $Top }
+    if ($MaxPages) { $connectParams['MaxPages'] = $MaxPages }
     if ($UseDeviceAuthentication) { $connectParams['UseDeviceAuthentication'] = $true }
 
     write-Host "..get base agent listing."
@@ -98,7 +108,10 @@ No tenant ID configured. This tool never ships with a tenant baked in — set yo
     $inventory = Connect-PPXInventoryApi @connectParams
 
     $records = @($inventory.data)
-    Write-Host "Inventory API returned $($records.Count) of $($inventory.totalRecords) agent record(s)."
+    Write-Host "Inventory API returned $($records.Count) of $($inventory.totalRecords) agent record(s) across $($inventory.pagesRetrieved) page(s)."
+    if ($inventory.resultTruncated) {
+        Write-Warning "Inventory API result is INCOMPLETE ($($records.Count) of $($inventory.totalRecords) retrieved). Re-run without -MaxPages / AgentGovernanceBaseline.MaxPages for a full report."
+    }
 
     # TODO: Patch 1 step 2 — Resolve-PPXConnectorTier (connector catalog + premium count)
     # TODO: Patch 1 step 3 — Resolve-PPXOwnerIdentity (batched Graph lookups)

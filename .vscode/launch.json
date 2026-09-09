@@ -11,6 +11,14 @@
             "cwd": "${workspaceFolder}/tools/agent-governance-baseline"
         },
         {
+            "name": "PPX: Debug Custom Connector Usage",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "${workspaceFolder}/tools/custom-connector-usage/Debug-CustomConnectorUsage.ps1",
+            "args": [ "-Verbose", "-MaxPages", "1" ],
+            "cwd": "${workspaceFolder}/tools/custom-connector-usage"
+        },
+        {
             // Generic fallback: run whatever .ps1 is in the active editor.
             // Only useful for scripts that actually invoke something at top level.
             "name": "PowerShell: Current File",

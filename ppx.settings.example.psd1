@@ -43,8 +43,15 @@
 
         # TenantId = ''   # uncomment to use a different tenant for just this tool
 
-        # Page size passed to the Inventory API query. 0 = use the API default.
+        # Rows fetched per Inventory API request (1-1000; values above 1000 are clamped, the API
+        # will not return more in one page). 0 = use the default (1000). This does NOT cap the
+        # total: the tool follows skipToken paging until every agent record is retrieved.
         Top = 0
+
+        # Safety cap on how many Inventory API pages to follow. 0 = no cap (retrieve everything).
+        # Set a small number for a quick partial pull while testing -- the report is then flagged
+        # INCOMPLETE in its .limitations.txt sidecar.
+        MaxPages = 0
 
         # Where the CSV report (and its .limitations.txt sidecar) is written. A folder path
         # auto-names a timestamped file into it; a path ending in .csv is used as-is.
@@ -54,5 +61,46 @@
         # Whether to write the CSV report (and its .limitations.txt sidecar) to disk.
         # $false means: only build and return the shaped rows in memory, write nothing to disk.
         ExportReport = $true
+    }
+
+    # ---------------------------------------------------------------------------
+    # tools/custom-connector-usage
+    # ---------------------------------------------------------------------------
+    CustomConnectorUsage = @{
+
+        # TenantId = ''   # uncomment to use a different tenant for just this tool
+
+        # Rows fetched per Inventory API request (1-1000; values above 1000 are clamped). 0 = default
+        # (1000). This does NOT cap the total: the tool follows skipToken paging until every
+        # connector-emitting resource (apps, flows, agents) has been retrieved.
+        Top = 0
+
+        # Safety cap on how many Inventory API pages to follow per query. 0 = no cap (retrieve
+        # everything). A small number gives a quick partial pull while testing -- the report is then
+        # flagged INCOMPLETE in its .limitations.txt sidecar.
+        MaxPages = 0
+
+        # Cap on how many environments the per-environment connector lookup (connectivity API) runs
+        # against. 0 = all. Set a small number for a quick test; the report notes partial coverage.
+        MaxEnvironments = 0
+
+        # $true = skip the per-environment connectivity calls entirely. Fast, but the report is then
+        # built from the Inventory usage heuristic alone: only custom connectors that a resource
+        # references appear, IsCustomApi is "Inferred", ExistsInEnvironmentList is "Unknown".
+        SkipEnvironmentConnectorLookup = $false
+
+        # Where the CSV report (and its .limitations.txt sidecar) is written. A folder path
+        # auto-names a timestamped file into it; a path ending in .csv is used as-is.
+        # '' = use the default reports\ folder at the repo root (git-ignored).
+        OutputPath = ''
+
+        # Whether to write the CSV report (and its .limitations.txt sidecar) to disk.
+        # $false means: only build and return the shaped rows in memory, write nothing to disk.
+        ExportReport = $true
+
+        # $true = also emit one placeholder row for every environment that has NO custom connectors
+        # (blank ConnectorId), so the CSV doubles as a "confirmed clean" list. $false (default) =
+        # only rows for environments that have at least one custom connector.
+        IncludeAllEnvironments = $false
     }
 }

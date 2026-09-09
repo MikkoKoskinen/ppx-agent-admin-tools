@@ -11,6 +11,128 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are 
 
 ## [Unreleased]
 
+### New tool — Custom Connector Usage
+
+`Get-PPXCustomConnectorUsage` (`tools/custom-connector-usage/`): a tenant-wide report of which Power
+Platform environments have **custom connectors**, one row per `(environment × custom connector)`. It
+covers both custom connectors an app/flow/agent references and custom connectors that merely exist in
+an environment (created/imported but unused). Read-only, point-in-time. Solution description:
+`PPXCustomConnectorUsage.md`.
+
+- **Three data pulls, one delegated token, all against `https://api.powerplatform.com`:**
+  1. Inventory API (`POST /resourcequery/resources/query`) — every environment + basic details.
+  2. Inventory API — every connector-emitting resource (`microsoft.powerapps/canvasapps`,
+     `.../modeldrivenapps`, `microsoft.powerautomate/cloudflows`, `.../agentflows`,
+     `.../m365agentflows`, `microsoft.copilotstudio/agents`) with its
+     `properties.powerPlatformConnectors` array. Both follow `skipToken` paging.
+  3. Connectivity API (`GET /connectivity/environments/{id}/connectors?$filter=environment eq '{id}'&api-version=2024-10-01`),
+     once per environment — the connectors that **exist** there, the authoritative
+     `properties.isCustomApi` flag, and connector display name / publisher / tier / created time.
+     HTTP 429 is retried honouring `Retry-After`; every other per-environment error is recorded and
+     the run continues.
+  The KQLOM clause set has no `mv-expand`, so `powerPlatformConnectors` is expanded client-side.
+- **Why the connectivity API and not the Inventory connector catalogue:** the Inventory
+  `microsoft.powerplatformconnector/connectors` type is tenant-level and carries no environment
+  association, and the per-resource usage array only shows connectors something references — neither
+  can answer "which custom connectors exist in this environment". The connectivity API is
+  environment-scoped, hence the per-environment loop.
+- **`private/` step scripts:** `Get-PPXPowerPlatformToken.ps1` (Az context reuse + delegated token,
+  shared by both APIs), `Connect-PPXInventoryApi.ps1` (**deliberate copy** of the
+  agent-governance-baseline file's auth + `skipToken`-paging machinery, parameterised here by
+  `-Clauses` so the two Inventory queries reuse it — extracting the shared code to `tools/_shared/`
+  is a tracked follow-up for both tools), `Get-PPXEnvironmentConnector.ps1` (connectivity API),
+  `Get-PPXNormalizedConnectorKey.ps1` (normalises connector IDs so the Inventory usage form
+  `shared_x-<hex>` matches the connectivity form `shared_x.<hex>.<hex>` — base-name collisions
+  within one environment merge rows, noted in the sidecar), `Test-PPXCustomConnectorId.ps1`
+  (ID-shape heuristic — used only as a fallback for environments whose connectivity lookup was
+  skipped or failed), `ConvertTo-PPXConnectorUsageRow.ps1` (merges existence + usage),
+  `ConvertTo-PPXJoinedList.ps1`, `Get-PPXNestedValue.ps1` (copied from agent-governance-baseline),
+  `Export-PPXReport.ps1` (CSV + `.limitations.txt` sidecar, same two-file pattern and rationale as
+  the first tool).
+- **Report schema:** 19 columns — environment basics (`EnvironmentName`/`Id`/`Type`/
+  `IsManagedEnvironment`/`EnvironmentGroup`/`EnvironmentGroupId`/`EnvironmentRegion`), connector
+  metadata (`ConnectorId`/`ConnectorName`/`ConnectorPublisher`/`ConnectorTier`/
+  `ConnectorCreatedTime`), provenance (`IsCustomApi` = `True` authoritative / `Inferred` heuristic,
+  `ExistsInEnvironmentList` = `True`/`False`/`Unknown (lookup failed|skipped)`,
+  `IsReferencedByResource`, `DetectionSource` = `ConnectivityApi`/`UsageHeuristic`/`Both`/`(none)`),
+  and usage (`ConsumingResourceCount`/`ConsumingResourcesByType`/`ConsumingResources`). Default
+  output is only environments with ≥ 1 custom connector; `-IncludeAllEnvironments` adds a placeholder
+  row per clean environment.
+- **Parameters / settings** (`CustomConnectorUsage` section, falling back to `Common`): `TenantId`,
+  `Top`, `MaxPages`, `MaxEnvironments` (caps the per-environment loop for testing — report flagged
+  **PARTIAL**), `SkipEnvironmentConnectorLookup` (Inventory-heuristic-only fast mode),
+  `UseDeviceAuthentication`, `OutputPath`, `IncludeAllEnvironments`, `ExportReport`.
+- **`.limitations.txt` sidecar** records Inventory paging completeness, connectivity-lookup coverage
+  (with an explicit `*** Environment coverage PARTIAL ***` line when `-MaxEnvironments` capped it),
+  every per-environment lookup failure, and whether the report is authoritative or heuristic. The
+  "confirm the `$filter` contract" note only fires after a full, clean run that still produced no
+  authoritative rows.
+- **`isCustomApi` truthiness** is matched tolerantly (`$true` or the string `"true"`/`"True"`/`1`) so
+  a string form from the API does not silently drop every custom connector.
+- **Known open item:** the connectivity `$filter=environment eq '{id}'` value is from community
+  reports, not an official Microsoft example (their docs omit the request sample). Capped test runs
+  returned HTTP 200 from the endpoint; a full-coverage run confirming authoritative
+  `IsCustomApi = True` rows is still pending.
+- **`ppx.settings.example.psd1`** / **`ppx.settings.psd1`** — added the `CustomConnectorUsage`
+  section. **`.vscode/launch.json`** — added `PPX: Debug Custom Connector Usage`.
+  **`README.md`**, **`SETTINGS.md`**, **`PPXCustomConnectorUsage.md`**,
+  **`tools/custom-connector-usage/README.md`** — new tool documented.
+
+### Custom Connector Usage — bring-up fixes (paging convergence, token refresh, scoping)
+
+First runs against a real tenant surfaced three defects, all fixed:
+
+- **Runaway `skipToken` paging.** The connector-usage query used a `project` clause with aliased
+  columns — including the dynamic `connectors = properties.powerPlatformConnectors` array — and
+  ordered by the projected aliases. Against a live tenant Azure Resource Graph never stopped paging:
+  it kept returning a continuation token with near-zero rows per page (observed at page 2,798, by
+  which point the delegated token had expired and the request failed with
+  `AADSTS500133: Assertion is not within its valid time range`). **Fix:** both Inventory queries
+  (`Get-PPXCustomConnectorUsage.ps1`) now match the Agent Governance Baseline tool's proven shape —
+  **no `project`**, `orderby tostring(properties.createdAt) desc, name asc` on materialised columns —
+  and `ConvertTo-PPXConnectorUsageRow.ps1` reads every field off the raw record shape (`name` /
+  `type` / `properties.*` / `location`) instead of projected aliases.
+- **No non-progress guard.** `Connect-PPXInventoryApi.ps1` now stops — marking `resultTruncated` —
+  after **three consecutive empty pages with a continuation token still pending**; the hard page cap
+  was lowered 5000 → 1000; a progress line prints every 10 pages. A pathological query can no longer
+  loop long enough to outlive the token.
+- **Token expiry on long runs.** `Connect-PPXInventoryApi` and `Get-PPXEnvironmentConnector` take a
+  shared `-TokenFactory` scriptblock from the entry point and refresh the token **once on an HTTP
+  401**, then retry. The factory must be a **plain** scriptblock: an initial `.GetNewClosure()`
+  rebound it to a fresh module scope where the dot-sourced `Get-PPXPowerPlatformToken` was not
+  visible (`The term 'Get-PPXPowerPlatformToken' is not recognized`), which cascaded into an empty
+  `Bearer` header and a 401. A plain scriptblock resolves both the dot-sourced function and the
+  entry-scope `$TenantId` / `$UseDeviceAuthentication` by dynamic scope when invoked from a
+  sub-function.
+- `Get-PPXEnvironmentConnector` retry loop now also handles 401 alongside the existing 429 handling.
+
+### Agent Governance Baseline — `skipToken` paging (fixes 1000-record truncation)
+
+Large tenants were silently capped at 1000 agents: `Connect-PPXInventoryApi` fired a single request
+with `Options.Top = 1000` and ignored the `skipToken` continuation, so a tenant with (e.g.) 5,377
+agents exported only 1,000 rows, with the `.limitations.txt` sidecar reporting
+`resultTruncated = true`.
+
+- **`tools/agent-governance-baseline/private/Connect-PPXInventoryApi.ps1`** — now loops on
+  `skipToken`: each response's token is fed back into `Options.SkipToken` until the service returns
+  none, and all pages are concatenated into one synthesised envelope
+  (`{ totalRecords, count, resultTruncated, skipToken, pagesRetrieved, data[] }`). Azure Resource
+  Graph caps a page at 1000 rows, so `-Top` is clamped to that and is now a *per-request* page size,
+  not a total cap. The `orderby` gained a `name` tie-breaker (skipToken paging is only stable with a
+  fully deterministic sort). Added a defensive de-dup (keyed on `id`, then `name`) and a 5000-page
+  hard safety cap. `resultTruncated` in the returned envelope is `$true` only when the loop stopped
+  with a token still pending, or fewer records came back than `totalRecords`.
+- **`Get-PPXAgentGovernanceBaseline.ps1`** — new `-MaxPages` parameter (`[int]`, `0` = unlimited),
+  same parameter-then-settings-fallback pattern as `-Top`; passed through to `Connect-PPXInventoryApi`.
+  Console output now reports pages retrieved and `Write-Warning`s if the result is incomplete.
+- **`tools/agent-governance-baseline/private/Export-PPXReport.ps1`** — `.limitations.txt` now records
+  the page count, explains an early `resultTruncated` (points at `-MaxPages`), and adds a benign note
+  when `rows.Count < totalRecords` despite full paging (rows dropped in shaping, not API truncation).
+- **`ppx.settings.example.psd1`** / **`ppx.settings.psd1`** — added `AgentGovernanceBaseline.MaxPages`
+  (`0` = retrieve everything); clarified the `Top` comment (per-request page size, not a total cap).
+- **`SETTINGS.md`**, **`PPXAgentGovernanceBaseline.md`**, **`tools/agent-governance-baseline/README.md`**
+  — documented `skipToken` paging, `MaxPages`, and the revised meaning of `Top`.
+
 ### Agent Governance Baseline — schema assembly and CSV export
 
 `Get-PPXAgentGovernanceBaseline` now writes a governance-baseline CSV (plus a sidecar
