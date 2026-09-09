@@ -109,6 +109,25 @@ Get-PPXAgentGovernanceBaseline -Top 50         # Top = 50 (override); TenantId s
 | `ExportReport` | bool | `$true` | Whether to write the CSV report to disk. `$false` = only build and return the shaped rows in memory. |
 | `IncludeAllEnvironments` | bool | `$false` | `$true` = also emit one placeholder row (blank `ConnectorId`) for every environment that has **no** custom connectors, so the CSV doubles as a "confirmed clean" list. `$false` = only rows for environments with ≥ 1 custom connector. |
 
+### `CopilotCreditTenantPool` — [`tools/copilot-credit-tenant-pool`](tools/copilot-credit-tenant-pool)
+
+Sets the Copilot Credit **"Draw from the available capacity in my tenant"** option (the `TenantPool`
+enforcement rule on the `MCSMessages` currency allocation) for all or selected environments. This is
+the first PPX tool that **writes**.
+
+The *change intent* is always passed on the command line, never read from the settings file:
+`-DrawFromTenantCapacity $true|$false` (required), exactly one of `-EnvironmentId <guid[,guid…]>` /
+`-AllEnvironments`, and `-Apply` to actually write (without it the run is a dry run that only reads
+and reports).
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `TenantId` | string | *(inherits `Common`)* | Override the tenant for just this tool. |
+| `Top` | int | `0` | Inventory API page size for the **environment list** (1–1000; higher is clamped). `0` = default (1000). Does not cap the total — `skipToken` paging retrieves every environment. Only relevant with `-AllEnvironments`. |
+| `MaxPages` | int | `0` | Safety cap on Inventory API pages for the environment list. `0` = no cap. A small value gives a quick partial pull while testing; the list is then flagged **INCOMPLETE** and (with `-AllEnvironments`) some environments are missed. |
+| `OutputPath` | string | `''` | Where the CSV report (+ `.limitations.txt` sidecar) is written. A folder path auto-names a timestamped file; a path ending in `.csv` is used as-is. `''` = the repo-root `reports\` folder (git-ignored). |
+| `ExportReport` | bool | `$true` | Whether to write the CSV report to disk. `$false` = only read and shape the rows in memory. |
+
 ## Authentication
 
 The tools call the **Power Platform API** (`https://api.powerplatform.com`) with an interactive

@@ -11,6 +11,78 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are 
 
 ## [Unreleased]
 
+### New tool — Copilot Credit — Tenant Pool Draw
+
+`Set-PPXCopilotCreditTenantPoolDraw` (`tools/copilot-credit-tenant-pool/`): sets the Copilot Credit
+**"Draw from the available capacity in my tenant"** option — the `TenantPool` enforcement rule on an
+environment's `MCSMessages` currency allocation — to `$true` or `$false` for **all** or **selected**
+Power Platform environments. **The first PPX tool that writes.** Solution description:
+`PPXCopilotCreditTenantPool.md`.
+
+- **API:** `GET` / `PATCH https://api.powerplatform.com/licensing/allocationsByEnvironment`
+  (api-version `2024-10-01`), currency `MCSMessages`, one delegated Az token shared with the
+  Inventory API environment-list query. Matches the endpoint used in the CAT team's
+  [Copilot harness cost-governance post](https://microsoft.github.io/mcscatblog/posts/copilot-harness-cost-governance/);
+  the `enabled` semantics (`TenantPool` on = draw from unallocated tenant capacity, off = capped at
+  the environment's allocation) are per the
+  [Manage Copilot Credits allocations programmatically](https://learn.microsoft.com/en-us/power-platform/admin/programmability-tutorial-manage-copilot-credit-allocations)
+  tutorial.
+- **Read-modify-write, minimal change.** Per environment: `GET` the current allocation →
+  `Resolve-PPXTenantPoolChange` (pure planner) builds a `PATCH` body containing **only** the
+  `MCSMessages` currency, with `allocated` carried through unchanged and `enforcementRules` = the
+  existing rules with just `TenantPool` flipped. `Alert` / `PayGo` / `Deny` and `autoAllocated` are
+  never modified (the last is not echoed back — the write model documents only `currencyType` /
+  `allocated` / `enforcementRules`). An environment already at the desired value is `NoChange` unless
+  `-Force`.
+- **Dry run by default.** Without `-Apply` every target is read and the before/after CSV is produced
+  with `WouldChange` / `WouldCreateAllocation` / `NoChange`, but nothing is `PATCH`ed.
+  `SupportsShouldProcess` (`ConfirmImpact = 'Medium'`) so `-WhatIf` previews and `-Confirm` prompts
+  per environment; `-Apply` alone does not prompt (the dry run is the review gate).
+- **Explicit targeting.** Exactly one of `-EnvironmentId <guid[,guid...]>` / `-AllEnvironments` /
+  `-InputCsv <path>` — the entry point throws if none or more than one is given. `-AllEnvironments`
+  takes its target set from the Inventory API environment list
+  (`microsoft.powerplatform/environments`, same `project`-less shape and skipToken paging as the
+  other tools); a truncated list is flagged **INCOMPLETE**.
+- **Review-then-apply via `-InputCsv`.** Point the tool at a CSV (typically a dry-run report trimmed
+  to just the rows you want) and it targets the environments in that file's `EnvironmentId` column.
+  An optional `DesiredValue` column (TRUE/FALSE) sets a per-environment target value when
+  `-DrawFromTenantCapacity` is omitted, so one file can set different values per environment;
+  `-DrawFromTenantCapacity` (now non-mandatory) still wins when both are supplied. Blank
+  `EnvironmentId` rows are skipped, duplicates de-duplicated (first wins), an unparseable
+  `DesiredValue` cell throws. Each environment is still re-read live before the plan is computed, so
+  a stale `TenantPoolDraw_Before` in the edited CSV cannot cause a wrong write.
+  (`private/Import-PPXTargetCsv.ps1`, unit-tested; the sidecar records the target source.)
+- **`CreatedAllocation` case.** An environment with no `MCSMessages` allocation defaults to
+  `TenantPool = True`. Setting it to `False` requires writing an allocation, so one is created with
+  `allocated = 0`; the row is flagged `WouldCreateAllocation` / `CreatedAllocation`. Setting such an
+  environment to `True` is `NoChange` (already the default).
+- **Per-environment resilience.** `TenantPoolLockedByPolicy` (a published environment-group rule
+  governs the setting) is detected in the `PATCH` error body and re-thrown as `LOCKED_BY_POLICY:`,
+  surfaced as `Skipped (locked by policy)`. Licensing `GET` HTTP 404 → `N/A (no allocation surface)`.
+  HTTP 429 is retried honouring `Retry-After`; HTTP 401 triggers one token refresh. Any other
+  per-environment error is recorded and the sweep continues.
+- **`private/` step scripts:** `Get-PPXPowerPlatformToken.ps1`, `Connect-PPXInventoryApi.ps1`,
+  `Get-PPXNestedValue.ps1` (**deliberate copies** of the custom-connector-usage versions —
+  `tools/_shared/` extraction still a tracked follow-up), `Import-PPXTargetCsv.ps1` (`-InputCsv`
+  reader), `Get-PPXEnvironmentCreditAllocation.ps1`
+  (licensing GET), `Resolve-PPXTenantPoolChange.ps1` (pure planner; unit-tested against mock
+  allocation shapes), `Set-PPXEnvironmentCreditAllocation.ps1` (licensing PATCH + policy-lock
+  detection), `ConvertTo-PPXTenantPoolRow.ps1` (before/after row), `Export-PPXReport.ps1` (CSV +
+  `.limitations.txt` run summary — same two-file pattern as the other tools).
+- **Report schema:** 14 columns — environment basics (`EnvironmentName` / `EnvironmentId` /
+  `EnvironmentType` / `IsManagedEnvironment` / `EnvironmentGroup` / `EnvironmentGroupId`),
+  `CurrencyType` (`MCSMessages`), `AllocatedCredits` (preserved), `TenantPoolDraw_Before` /
+  `DesiredValue` / `TenantPoolDraw_After`, `OtherEnforcementRules` (e.g. `Alert=True; PayGo=False;
+  Deny=False` — shown to prove they were left alone), `Action`, `Mode`, `Detail`.
+- **`.limitations.txt` sidecar** doubles as the run summary: mode, desired value,
+  targeted-vs-total environment count, per-`Action` tally, an explicit **DRY RUN — NOTHING WAS
+  WRITTEN** banner when applicable, and every per-environment error.
+- **`ppx.settings.example.psd1`** / **`ppx.settings.psd1`** — added the `CopilotCreditTenantPool`
+  section (`Top`, `MaxPages`, `OutputPath`, `ExportReport`; the change intent is command-line only).
+  **`.vscode/launch.json`** — added `PPX: Debug Copilot Credit Tenant Pool` (dry run by default).
+  **`README.md`**, **`SETTINGS.md`**, **`PPXCopilotCreditTenantPool.md`**,
+  **`tools/copilot-credit-tenant-pool/README.md`** — new tool documented.
+
 ### New tool — Custom Connector Usage
 
 `Get-PPXCustomConnectorUsage` (`tools/custom-connector-usage/`): a tenant-wide report of which Power

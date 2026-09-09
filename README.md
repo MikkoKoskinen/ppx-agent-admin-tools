@@ -46,6 +46,41 @@ first full run. See the [tool README](tools/custom-connector-usage/README.md).
 Solution and high-level technical description:
 [PPXCustomConnectorUsage.md](PPXCustomConnectorUsage.md).
 
+### [Copilot Credit — Tenant Pool Draw](tools/copilot-credit-tenant-pool) — *experimental*
+
+The first PPX tool that **writes**. One command sets the Copilot Credit **"Draw from the available
+capacity in my tenant"** option — the `TenantPool` enforcement rule on each environment's
+`MCSMessages` (Copilot Credits) currency allocation — to `$true` or `$false` for **all** or
+**selected** Power Platform environments. Every write is read-modify-write: the environment's current
+allocation is read first, and the allocated credit amount plus every other enforcement rule
+(`Alert` / `PayGo` / `Deny`) are sent back unchanged — only `TenantPool` moves.
+
+It is **dry run by default**: without `-Apply` it reads every target environment and writes a
+before/after CSV (plus a `.limitations.txt` run summary) showing exactly what *would* change, and
+touches nothing. A target must be chosen explicitly — `-EnvironmentId <guid[,guid…]>`,
+`-AllEnvironments`, or `-InputCsv <path>`; it never changes every environment implicitly.
+`-InputCsv` reads the `EnvironmentId` column of a CSV — typically a **dry-run report trimmed to just
+the rows you want applied** (an optional `DesiredValue` column can even set a different value per
+environment). Environments locked by a published environment-group rule (`TenantPoolLockedByPolicy`)
+and environments with no allocation surface are recorded and skipped, not fatal.
+
+```powershell
+. .\tools\copilot-credit-tenant-pool\Set-PPXCopilotCreditTenantPoolDraw.ps1
+
+# dry run: what would turning tenant-pool draw OFF everywhere do?
+Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $false -AllEnvironments
+
+# review the CSV, delete the rows you don't want, then apply only those
+Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $false -InputCsv .\reports\CopilotCreditTenantPool_<timestamp>.csv -Apply
+
+# or apply straight away, tenant-wide / to named environments
+Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $false -AllEnvironments -Apply
+Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $true -EnvironmentId <guid>,<guid> -Apply
+```
+
+Solution and high-level technical description:
+[PPXCopilotCreditTenantPool.md](PPXCopilotCreditTenantPool.md).
+
 ## Quick start
 
 ```powershell
@@ -109,6 +144,7 @@ ppx-agent-admin-tools/
 ├─ SETTINGS.md                 Settings + authentication reference.
 ├─ PPXAgentGovernanceBaseline.md   Solution + high-level technical description (Agent Governance Baseline).
 ├─ PPXCustomConnectorUsage.md      Solution + high-level technical description (Custom Connector Usage).
+├─ PPXCopilotCreditTenantPool.md   Solution + high-level technical description (Copilot Credit — Tenant Pool Draw).
 ├─ CHANGELOG.md                Technical change history.
 ├─ reports/                    Generated CSV reports + .limitations.txt sidecars (git-ignored).
 ├─ tools/
@@ -121,26 +157,39 @@ ppx-agent-admin-tools/
 │  │     ├─ ConvertTo-PPXArraySummary.ps1      Count + label summary for array fields (channels, etc.).
 │  │     ├─ Get-PPXNestedValue.ps1             Safe dotted-path property reader.
 │  │     └─ Export-PPXReport.ps1               Writes the CSV + limitations sidecar.
-│  └─ custom-connector-usage/
-│     ├─ Get-PPXCustomConnectorUsage.ps1      Entry-point function.
+│  ├─ custom-connector-usage/
+│  │  ├─ Get-PPXCustomConnectorUsage.ps1      Entry-point function.
+│  │  └─ private/                              Internal step scripts, dot-sourced at run time.
+│  │     ├─ Get-PPXPowerPlatformToken.ps1     Az sign-in + delegated token (shared by the two APIs).
+│  │     ├─ Connect-PPXInventoryApi.ps1       Query-agnostic Inventory API wrapper + skipToken paging.
+│  │     ├─ Get-PPXEnvironmentConnector.ps1   Connectivity API: connectors that exist in one environment.
+│  │     ├─ Get-PPXNormalizedConnectorKey.ps1 Normalises connector IDs so the two APIs' forms match.
+│  │     ├─ Test-PPXCustomConnectorId.ps1     ID-shape custom-connector heuristic (fallback).
+│  │     ├─ ConvertTo-PPXConnectorUsageRow.ps1  Merges existence + usage into one row per (env × connector).
+│  │     ├─ Get-PPXNestedValue.ps1            Safe dotted-path property reader.
+│  │     ├─ ConvertTo-PPXJoinedList.ps1       Caps a list into one '; '-joined CSV cell.
+│  │     └─ Export-PPXReport.ps1              Writes the CSV + limitations sidecar.
+│  └─ copilot-credit-tenant-pool/
+│     ├─ Set-PPXCopilotCreditTenantPoolDraw.ps1   Entry-point function (WRITE; dry run unless -Apply).
 │     └─ private/                              Internal step scripts, dot-sourced at run time.
-│        ├─ Get-PPXPowerPlatformToken.ps1     Az sign-in + delegated token (shared by the two APIs).
-│        ├─ Connect-PPXInventoryApi.ps1       Query-agnostic Inventory API wrapper + skipToken paging.
-│        ├─ Get-PPXEnvironmentConnector.ps1   Connectivity API: connectors that exist in one environment.
-│        ├─ Get-PPXNormalizedConnectorKey.ps1 Normalises connector IDs so the two APIs' forms match.
-│        ├─ Test-PPXCustomConnectorId.ps1     ID-shape custom-connector heuristic (fallback).
-│        ├─ ConvertTo-PPXConnectorUsageRow.ps1  Merges existence + usage into one row per (env × connector).
-│        ├─ Get-PPXNestedValue.ps1            Safe dotted-path property reader.
-│        ├─ ConvertTo-PPXJoinedList.ps1       Caps a list into one '; '-joined CSV cell.
-│        └─ Export-PPXReport.ps1              Writes the CSV + limitations sidecar.
+│        ├─ Get-PPXPowerPlatformToken.ps1     Az sign-in + delegated token (copy).
+│        ├─ Connect-PPXInventoryApi.ps1       Inventory API wrapper + skipToken paging (copy) — env list.
+│        ├─ Import-PPXTargetCsv.ps1           -InputCsv reader: EnvironmentId (+ optional DesiredValue).
+│        ├─ Get-PPXEnvironmentCreditAllocation.ps1  GET licensing/allocationsByEnvironment/{id}.
+│        ├─ Resolve-PPXTenantPoolChange.ps1   Pure planner: minimal read-modify-write PATCH body.
+│        ├─ Set-PPXEnvironmentCreditAllocation.ps1  PATCH licensing/allocationsByEnvironment (+policy-lock detect).
+│        ├─ ConvertTo-PPXTenantPoolRow.ps1    Shapes one before/after report row per environment.
+│        ├─ Get-PPXNestedValue.ps1            Safe dotted-path property reader (copy).
+│        └─ Export-PPXReport.ps1              Writes the CSV + .limitations.txt run summary.
 └─ .vscode/                    Debug configurations (see Development).
 ```
 
 ## Development
 
-- Debugging in VS Code: open the Run and Debug panel, pick **PPX: Debug Governance Baseline** or
-  **PPX: Debug Custom Connector Usage**, and press F5. Each runs a small harness (`Debug-*.ps1`,
-  git-ignored) that dot-sources the entry-point function and calls it, so breakpoints in the
-  function and `private/*.ps1` are hit.
+- Debugging in VS Code: open the Run and Debug panel, pick **PPX: Debug Governance Baseline**,
+  **PPX: Debug Custom Connector Usage**, or **PPX: Debug Copilot Credit Tenant Pool**, and press F5.
+  Each runs a small harness (`Debug-*.ps1`, git-ignored) that dot-sources the entry-point function
+  and calls it, so breakpoints in the function and `private/*.ps1` are hit. The Copilot Credit
+  harness defaults to a **dry run** (no `-Apply`) so F5 never writes.
 - Adding a setting or a new tool: see the contributor sections in [SETTINGS.md](SETTINGS.md).
 - Technical history of changes: [CHANGELOG.md](CHANGELOG.md).

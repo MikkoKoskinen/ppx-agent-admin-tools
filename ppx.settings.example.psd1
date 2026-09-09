@@ -103,4 +103,38 @@
         # only rows for environments that have at least one custom connector.
         IncludeAllEnvironments = $false
     }
+
+    # ---------------------------------------------------------------------------
+    # tools/copilot-credit-tenant-pool
+    #
+    # Sets the Copilot Credit "Draw from the available capacity in my tenant" option (the TenantPool
+    # enforcement rule on the MCSMessages currency allocation) for all or selected environments.
+    #
+    # The change intent is ALWAYS passed on the command line, never from this file:
+    #   -DrawFromTenantCapacity $true|$false   (required)   the value to set
+    #   -EnvironmentId <guid[,guid...]>  or  -AllEnvironments   (exactly one)   the targets
+    #   -Apply                                                  actually write (default = dry run)
+    # ---------------------------------------------------------------------------
+    CopilotCreditTenantPool = @{
+
+        # TenantId = ''   # uncomment to use a different tenant for just this tool
+
+        # Inventory API page size for the environment list (1-1000; values above 1000 are clamped).
+        # 0 = default (1000). Does NOT cap the total -- skipToken paging retrieves every environment.
+        Top = 0
+
+        # Safety cap on Inventory API pages for the environment list. 0 = no cap. A small number
+        # gives a quick partial pull while testing; the environment list is then flagged INCOMPLETE
+        # and (with -AllEnvironments) some environments are missed.
+        MaxPages = 0
+
+        # Where the CSV report (and its .limitations.txt sidecar) is written. A folder path
+        # auto-names a timestamped file into it; a path ending in .csv is used as-is.
+        # '' = use the default reports\ folder at the repo root (git-ignored).
+        OutputPath = ''
+
+        # Whether to write the CSV report (and its .limitations.txt sidecar) to disk.
+        # $false means: only read + shape the rows in memory, write nothing to disk.
+        ExportReport = $true
+    }
 }

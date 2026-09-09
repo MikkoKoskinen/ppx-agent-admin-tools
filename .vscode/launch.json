@@ -19,6 +19,16 @@
             "cwd": "${workspaceFolder}/tools/custom-connector-usage"
         },
         {
+            // DRY RUN by default (no -Apply): reads every environment and writes the report, never
+            // changes anything. Add "-Apply" to args to exercise the write path.
+            "name": "PPX: Debug Copilot Credit Tenant Pool",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "${workspaceFolder}/tools/copilot-credit-tenant-pool/Debug-CopilotCreditTenantPool.ps1",
+            "args": [ "-Verbose", "-DrawFromTenantCapacity", "$false", "-AllEnvironments" ],
+            "cwd": "${workspaceFolder}/tools/copilot-credit-tenant-pool"
+        },
+        {
             // Generic fallback: run whatever .ps1 is in the active editor.
             // Only useful for scripts that actually invoke something at top level.
             "name": "PowerShell: Current File",
