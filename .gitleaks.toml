@@ -1,13 +1,17 @@
 # gitleaks configuration - committed so every contributor, pre-commit hook, and
-# CI pipeline scans with the same rules and allowlist.
+# CI pipeline (.github/workflows/gitleaks.yml) scan with the same rules and allowlist.
 #
-# Run:  gitleaks detect --source . --config .gitleaks.toml --report-path gitleaks-report.json
+# Run locally:  gitleaks detect --source . --config .gitleaks.toml --report-path gitleaks-report.json
 #
 # The scan output (gitleaks-report.json) is gitignored; this config is not.
 
 [extend]
 useDefault = true
 
+# ---------------------------------------------------------------------------
+# Allowlist added onto the built-in "generic-api-key" rule (no regex here, so
+# the base rule is kept and only its allowlist is extended).
+# ---------------------------------------------------------------------------
 [[rules]]
 id = "generic-api-key"
 
@@ -15,4 +19,21 @@ id = "generic-api-key"
   description = "Microsoft first-party Power Platform API resource/app ID - public, documented in Microsoft Learn, not a secret"
   regexes = [
     '''8578e004-a5c6-46e7-913e-12f58912df43''',
+  ]
+
+# ---------------------------------------------------------------------------
+# Custom rule: internal user handles that must not appear in committed content.
+# Targets the concatenated handle forms only - the dotted email address
+# (e.g. someone.name@example.com) is fine and is not matched.
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "ppx-internal-handle"
+description = "Internal user handle in committed content - use a placeholder or the public email form instead"
+regex = '''(?i)\b(mkoskinen|mikkokoskinen)\b'''
+tags = ["internal", "handle"]
+
+  [rules.allowlist]
+  description = "This config file necessarily contains the handle literals in its own rule"
+  paths = [
+    '''\.gitleaks\.toml$''',
   ]
