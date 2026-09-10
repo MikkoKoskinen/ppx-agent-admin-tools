@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+#
+# PPX pre-commit hook: scan staged changes for secrets and internal identifiers
+# with gitleaks before they enter history.
+#
+# Enable once per clone:   git config core.hooksPath .githooks
+# Bypass for one commit:   git commit --no-verify   (CI still runs)
+#
+set -uo pipefail
+
+CONFIG=".gitleaks.toml"
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks is not installed or not on PATH." >&2
+  echo "  Install it:  winget install gitleaks  |  brew install gitleaks  |  https://github.com/gitleaks/gitleaks/releases" >&2
+  echo "  Or skip this check for one commit:  git commit --no-verify" >&2
+  exit 1
+fi
+
+echo "pre-commit: scanning staged changes with gitleaks..."
+if ! gitleaks protect --staged --redact --config "$CONFIG"; then
+  echo "" >&2
+  echo "pre-commit: gitleaks flagged a potential secret or internal identifier above." >&2
+  echo "  - Real secret:    remove it, rotate the credential, do not commit." >&2
+  echo "  - False positive: add an allowlist entry to $CONFIG explaining why it is safe." >&2
+  echo "  - Bypass once:    git commit --no-verify" >&2
+  exit 1
+fi
+echo "pre-commit: clean."

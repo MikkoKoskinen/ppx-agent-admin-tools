@@ -1,0 +1,33 @@
+name: gitleaks
+
+# Secret / internal-identifier scanning.
+#   push / pull_request : scans the new commits (fast feedback, blocks the merge)
+#   schedule            : weekly full-history sweep
+#   workflow_dispatch   : run a full-history sweep on demand
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+
+permissions:
+  contents: read
+  pull-requests: write # allow the action to comment findings on a PR
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: ${{ github.workspace }}/.gitleaks.toml
+          # GITLEAKS_LICENSE is only required for GitHub organisation accounts.
+          # This repo is under a personal account, so no license key is needed.

@@ -11,6 +11,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are 
 
 ## [Unreleased]
 
+### Tooling — gitleaks secret scanning
+
+Secret and internal-identifier scanning is now part of the workflow, sharing one committed config
+([`.gitleaks.toml`](.gitleaks.toml)):
+
+- **CI** — `.github/workflows/gitleaks.yml` runs `gitleaks/gitleaks-action@v2` on every push and
+  pull request (new commits) plus a weekly full-history sweep and a manual `workflow_dispatch`. No
+  license key is needed for a personal-account repo.
+- **Pre-commit hook** — `.githooks/pre-commit` runs `gitleaks protect --staged`. Opt in per clone
+  with `git config core.hooksPath .githooks`.
+- **Config** — extends the default ruleset. Allowlists the public Power Platform API resource ID
+  `8578e004-…` (an identifier, not a secret); adds a custom rule blocking internal user handles from
+  committed content.
+- **Contributor guide** — new [`CONTRIBUTING.md`](CONTRIBUTING.md) covers setup, findings, and git
+  identity.
+- Repository history was rewritten once to normalise commit author/committer identity; file
+  contents are byte-for-byte unchanged.
+
 ### Documentation — per-tool solution descriptions moved into their tool folders
 
 The three tool-level solution / high-level technical descriptions moved from the repo root into the
