@@ -11,9 +11,9 @@ description. This root README is the landing page — status, quick start, and s
 
 | Tool | Status | What it does | Docs |
 |---|---|---|---|
-| **[Agent Governance Baseline](tools/agent-governance-baseline)** | 🧪 Experimental — partial | Tenant-wide inventory: one row per published Copilot Studio (V2) agent, 43 governance columns (ownership, environment, auth posture, build origin, connector/channel counts, sharing exposure, staleness). Read-only. | [Usage](tools/agent-governance-baseline/README.md) · [Solution](tools/agent-governance-baseline/PPXAgentGovernanceBaseline.md) |
+| **[Agent Governance Baseline](tools/agent-governance-baseline)** | 🧪 Production tested | Tenant-wide inventory: one row per published Copilot Studio (V2) agent, 43 governance columns (ownership, environment, auth posture, build origin, connector/channel counts, sharing exposure, staleness). Read-only. | [Usage](tools/agent-governance-baseline/README.md) · [Solution](tools/agent-governance-baseline/PPXAgentGovernanceBaseline.md) |
 | **[Custom Connector Usage](tools/custom-connector-usage)** | 🧪 Experimental | Tenant-wide view of custom connectors: one row per `(environment × connector)`, covering both connectors in active use and ones merely present in an environment. Read-only. | [Usage](tools/custom-connector-usage/README.md) · [Solution](tools/custom-connector-usage/PPXCustomConnectorUsage.md) |
-| **[Copilot Credit — Tenant Pool Draw](tools/copilot-credit-tenant-pool)** | 🧪 Experimental — writes | Sets the "draw from tenant pool" Copilot Credit enforcement rule on/off, per environment or tenant-wide. Dry-run by default; a target must be chosen explicitly. | [Usage](tools/copilot-credit-tenant-pool/README.md) · [Solution](tools/copilot-credit-tenant-pool/PPXCopilotCreditTenantPool.md) |
+| **[Copilot Credit — Tenant Pool Draw](tools/copilot-credit-tenant-pool)** | 🧪 Dev in Progress | Sets the "draw from tenant pool" Copilot Credit enforcement rule on/off, per environment or tenant-wide. Dry-run by default; a target must be chosen explicitly. | [Usage](tools/copilot-credit-tenant-pool/README.md) · [Solution](tools/copilot-credit-tenant-pool/PPXCopilotCreditTenantPool.md) |
 
 Each tool's known data gaps and limitations are also written into its own CSV output as a
 `.limitations.txt` sidecar at run time — not just documented here.
