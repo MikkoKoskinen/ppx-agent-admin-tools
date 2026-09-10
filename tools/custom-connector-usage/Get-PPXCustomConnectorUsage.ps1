@@ -7,7 +7,7 @@ function Get-PPXCustomConnectorUsage {
     .DESCRIPTION
         Second tool in the PPX collection. Same shape and approach as the Agent Governance Baseline
         tool: delegated Az token -> Power Platform API -> shape -> CSV plus a .limitations.txt
-        sidecar. See PPXCustomConnectorUsage.md (repo root) for the full schema and design.
+        sidecar. See PPXCustomConnectorUsage.md (in this tool's folder) for the full schema and design.
 
         Three data pulls, all against https://api.powerplatform.com with one delegated token:
 

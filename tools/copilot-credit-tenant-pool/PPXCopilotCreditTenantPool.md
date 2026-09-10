@@ -1,10 +1,8 @@
 # PPX Copilot Credit — Tenant Pool Draw — Solution Description
 
 Solution and high-level technical description for the **Copilot Credit — Tenant Pool Draw** tool. For
-how to run it, see
-[tools/copilot-credit-tenant-pool/README.md](tools/copilot-credit-tenant-pool/README.md); for
-settings and authentication, [SETTINGS.md](SETTINGS.md); for the technical change history,
-[CHANGELOG.md](CHANGELOG.md).
+how to run it, see [README.md](README.md) in this folder; for settings and authentication,
+[SETTINGS.md](../../SETTINGS.md); for the technical change history, [CHANGELOG.md](../../CHANGELOG.md).
 
 **Status:** experimental. The read → plan → PATCH pipeline is implemented and wired end-to-end
 against `https://api.powerplatform.com/licensing/allocationsByEnvironment` (api-version `2024-10-01`),
@@ -160,7 +158,7 @@ All three calls share that resource, so one token serves the whole run; a device
 Requires **Power Platform Administrator** / **Global Administrator** (a role that can manage licensing
 and capacity). Service-principal / unattended auth against this endpoint is a known platform
 limitation and is not implemented. Full detail:
-[SETTINGS.md § Authentication](SETTINGS.md#authentication).
+[SETTINGS.md § Authentication](../../SETTINGS.md#authentication).
 
 ### 6.4 The setting
 
@@ -241,7 +239,7 @@ Runtime knobs come from the shared settings file (`ppx.settings.psd1`, section
 (`Top` / `MaxPages`), output path, and `ExportReport`. The **change intent** —
 `-DrawFromTenantCapacity`, `-EnvironmentId` / `-AllEnvironments` / `-InputCsv`, `-Apply`, `-Force` —
 is only ever a command-line parameter, never a setting. Precedence is explicit parameter → settings file → default.
-See [SETTINGS.md](SETTINGS.md).
+See [SETTINGS.md](../../SETTINGS.md).
 
 ## 7. Implementation status
 

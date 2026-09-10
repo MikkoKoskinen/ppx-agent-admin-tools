@@ -6,7 +6,7 @@ custom connectors that merely exist in an environment. Part of the [PPX](../../R
 collection.
 
 Solution and high-level technical description:
-[PPXCustomConnectorUsage.md](../../PPXCustomConnectorUsage.md).
+[PPXCustomConnectorUsage.md](PPXCustomConnectorUsage.md).
 
 **Status: Experimental.** Both Inventory API pulls (environments, connector-emitting resources) and
 the per-environment connectivity-API connector lookup are implemented and wired end-to-end. The
@@ -50,7 +50,7 @@ Three pulls, one delegated token, all against `https://api.powerplatform.com`:
    sweep survives token expiry.
 
 The three are merged into one row per `(environment × custom connector)`. See
-[Report schema](../../PPXCustomConnectorUsage.md#5-report-schema) for the columns.
+[Report schema](PPXCustomConnectorUsage.md#5-report-schema) for the columns.
 
 ## Prerequisites
 

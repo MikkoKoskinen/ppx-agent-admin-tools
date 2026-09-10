@@ -4,7 +4,7 @@ Tenant-wide, one-row-per-agent governance baseline report for published Copilot 
 in Power Platform. Part of the [PPX](../../README.md) tool collection.
 
 Solution and high-level technical description:
-[PPXAgentGovernanceBaseline.md](../../PPXAgentGovernanceBaseline.md).
+[PPXAgentGovernanceBaseline.md](PPXAgentGovernanceBaseline.md).
 
 **Status: Experimental — partial implementation.** Inventory API connectivity, schema assembly, and
 CSV export are built — 43 columns per agent, most field paths confirmed against a live tenant
@@ -84,7 +84,7 @@ The function throws with setup instructions if no tenant ID is resolved. It sign
 via `Connect-AzAccount` (only when there is no usable Az context), writes a governance-baseline CSV
 to `reports\` at the repo root (git-ignored; override with `-OutputPath` or
 `AgentGovernanceBaseline.OutputPath` in settings) along with a `.limitations.txt` sidecar describing
-this run's known gaps, and returns the shaped rows. See [Report schema](../../PPXAgentGovernanceBaseline.md#5-report-schema)
+this run's known gaps, and returns the shaped rows. See [Report schema](PPXAgentGovernanceBaseline.md#5-report-schema)
 for the full column list and [Known limitations](#known-limitations) below for which columns are
 still blank pending owner/DLP/connector-tier enrichment.
 

@@ -6,7 +6,7 @@ enforcement rule on each environment's `MCSMessages` (Copilot Credits) currency 
 [PPX](../../README.md) tool collection, and the first one that **writes**.
 
 Solution and high-level technical description:
-[PPXCopilotCreditTenantPool.md](../../PPXCopilotCreditTenantPool.md).
+[PPXCopilotCreditTenantPool.md](PPXCopilotCreditTenantPool.md).
 
 **Status: Experimental.** The read → plan → PATCH pipeline is implemented and wired end-to-end
 against `https://api.powerplatform.com/licensing/allocationsByEnvironment` (api-version `2024-10-01`),

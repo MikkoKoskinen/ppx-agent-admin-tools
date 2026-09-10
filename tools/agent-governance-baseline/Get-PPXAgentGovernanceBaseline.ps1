@@ -6,7 +6,7 @@ function Get-PPXAgentGovernanceBaseline {
     .DESCRIPTION
         Primary entry point for the PPX Agent Governance Baseline tool. See the solution and
         high-level technical description for the full schema and architecture:
-        PPXAgentGovernanceBaseline.md (repo root).
+        PPXAgentGovernanceBaseline.md (in this tool's folder).
 
         Current state: Inventory API connectivity, schema assembly, and CSV export are implemented.
         Connector-tier resolution, owner resolution, and the DLP coverage flag are not yet built, so

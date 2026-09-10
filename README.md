@@ -24,7 +24,7 @@ not built yet, so `OwnerName`/`OwnerUPN`/`OwnerAccountStatus`, `PremiumConnector
 `private/*.ps1`.
 
 Solution and high-level technical description:
-[PPXAgentGovernanceBaseline.md](PPXAgentGovernanceBaseline.md).
+[tools/agent-governance-baseline/PPXAgentGovernanceBaseline.md](tools/agent-governance-baseline/PPXAgentGovernanceBaseline.md).
 
 ### [Custom Connector Usage](tools/custom-connector-usage) — *experimental*
 
@@ -44,7 +44,7 @@ implemented and wired end-to-end, writing a CSV plus a `.limitations.txt` sideca
 first full run. See the [tool README](tools/custom-connector-usage/README.md).
 
 Solution and high-level technical description:
-[PPXCustomConnectorUsage.md](PPXCustomConnectorUsage.md).
+[tools/custom-connector-usage/PPXCustomConnectorUsage.md](tools/custom-connector-usage/PPXCustomConnectorUsage.md).
 
 ### [Copilot Credit — Tenant Pool Draw](tools/copilot-credit-tenant-pool) — *experimental*
 
@@ -79,7 +79,7 @@ Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $true -EnvironmentId 
 ```
 
 Solution and high-level technical description:
-[PPXCopilotCreditTenantPool.md](PPXCopilotCreditTenantPool.md).
+[tools/copilot-credit-tenant-pool/PPXCopilotCreditTenantPool.md](tools/copilot-credit-tenant-pool/PPXCopilotCreditTenantPool.md).
 
 ## Quick start
 
@@ -142,14 +142,13 @@ Copy-Item ppx.settings.example.psd1 ppx.settings.psd1
 ppx-agent-admin-tools/
 ├─ ppx.settings.example.psd1   Settings template (committed). Copy to ppx.settings.psd1.
 ├─ SETTINGS.md                 Settings + authentication reference.
-├─ PPXAgentGovernanceBaseline.md   Solution + high-level technical description (Agent Governance Baseline).
-├─ PPXCustomConnectorUsage.md      Solution + high-level technical description (Custom Connector Usage).
-├─ PPXCopilotCreditTenantPool.md   Solution + high-level technical description (Copilot Credit — Tenant Pool Draw).
 ├─ CHANGELOG.md                Technical change history.
 ├─ reports/                    Generated CSV reports + .limitations.txt sidecars (git-ignored).
 ├─ tools/
 │  ├─ _shared/                 Helpers shared by every tool (e.g. Get-PPXSettings.ps1).
 │  ├─ agent-governance-baseline/
+│  │  ├─ README.md                            Tool usage instructions.
+│  │  ├─ PPXAgentGovernanceBaseline.md        Solution + high-level technical description.
 │  │  ├─ Get-PPXAgentGovernanceBaseline.ps1   Entry-point function.
 │  │  └─ private/                              Internal step scripts, dot-sourced at run time.
 │  │     ├─ Connect-PPXInventoryApi.ps1        Auth + Inventory API query.
@@ -158,6 +157,8 @@ ppx-agent-admin-tools/
 │  │     ├─ Get-PPXNestedValue.ps1             Safe dotted-path property reader.
 │  │     └─ Export-PPXReport.ps1               Writes the CSV + limitations sidecar.
 │  ├─ custom-connector-usage/
+│  │  ├─ README.md                            Tool usage instructions.
+│  │  ├─ PPXCustomConnectorUsage.md           Solution + high-level technical description.
 │  │  ├─ Get-PPXCustomConnectorUsage.ps1      Entry-point function.
 │  │  └─ private/                              Internal step scripts, dot-sourced at run time.
 │  │     ├─ Get-PPXPowerPlatformToken.ps1     Az sign-in + delegated token (shared by the two APIs).
@@ -170,6 +171,8 @@ ppx-agent-admin-tools/
 │  │     ├─ ConvertTo-PPXJoinedList.ps1       Caps a list into one '; '-joined CSV cell.
 │  │     └─ Export-PPXReport.ps1              Writes the CSV + limitations sidecar.
 │  └─ copilot-credit-tenant-pool/
+│     ├─ README.md                            Tool usage instructions.
+│     ├─ PPXCopilotCreditTenantPool.md        Solution + high-level technical description.
 │     ├─ Set-PPXCopilotCreditTenantPoolDraw.ps1   Entry-point function (WRITE; dry run unless -Apply).
 │     └─ private/                              Internal step scripts, dot-sourced at run time.
 │        ├─ Get-PPXPowerPlatformToken.ps1     Az sign-in + delegated token (copy).

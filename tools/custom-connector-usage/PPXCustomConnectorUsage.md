@@ -1,9 +1,8 @@
 # PPX Custom Connector Usage — Solution Description
 
 Solution and high-level technical description for the **Custom Connector Usage** tool. For how to
-run it, see [tools/custom-connector-usage/README.md](tools/custom-connector-usage/README.md); for
-settings and authentication, [SETTINGS.md](SETTINGS.md); for the technical change history,
-[CHANGELOG.md](CHANGELOG.md).
+run it, see [README.md](README.md) in this folder; for settings and authentication,
+[SETTINGS.md](../../SETTINGS.md); for the technical change history, [CHANGELOG.md](../../CHANGELOG.md).
 
 **Status:** experimental. Both Inventory API pulls (environments, connector-emitting resources) and
 the per-environment connectivity-API connector lookup are implemented and wired end-to-end. The
@@ -151,7 +150,7 @@ where the interactive browser prompt cannot render, such as the VS Code debugger
 
 Service-principal / unattended auth against the resource-query endpoint is a known platform
 limitation and is not implemented. Full detail:
-[SETTINGS.md § Authentication](SETTINGS.md#authentication).
+[SETTINGS.md § Authentication](../../SETTINGS.md#authentication).
 
 ### 6.4 Inventory API query approach
 
@@ -231,7 +230,7 @@ All runtime knobs come from the shared settings file (`ppx.settings.psd1`, secti
 and paging cap (`MaxPages`), environment-scan cap (`MaxEnvironments`),
 `SkipEnvironmentConnectorLookup`, auth mode, output path, `IncludeAllEnvironments`, and
 `ExportReport`. Precedence is explicit parameter → settings file → tool/API default. See
-[SETTINGS.md](SETTINGS.md).
+[SETTINGS.md](../../SETTINGS.md).
 
 ## 7. Implementation status
 

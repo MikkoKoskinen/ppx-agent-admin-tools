@@ -1,9 +1,8 @@
 # PPX Agent Governance Baseline — Solution Description
 
 Solution and high-level technical description for the **Agent Governance Baseline** tool. For how to
-run it, see [tools/agent-governance-baseline/README.md](tools/agent-governance-baseline/README.md);
-for settings and authentication, [SETTINGS.md](SETTINGS.md); for the technical change history,
-[CHANGELOG.md](CHANGELOG.md).
+run it, see [README.md](README.md) in this folder; for settings and authentication,
+[SETTINGS.md](../../SETTINGS.md); for the technical change history, [CHANGELOG.md](../../CHANGELOG.md).
 
 **Status:** experimental. Inventory API connectivity, schema assembly, and CSV export are implemented
 and working. Owner resolution, DLP coverage, and connector-tier resolution are not built yet, so five
@@ -200,7 +199,7 @@ used as a client ID (doing so yields `AADSTS90009`). The tool therefore borrows 
 Az PowerShell first-party client rather than requiring each user to register an Entra app. A
 device-code option (`UseDeviceAuthentication`) exists for environments where the interactive browser
 prompt cannot render, such as the VS Code debugger. A dedicated Entra app registration is documented
-as an alternative. Full detail: [SETTINGS.md § Authentication](SETTINGS.md#authentication).
+as an alternative. Full detail: [SETTINGS.md § Authentication](../../SETTINGS.md#authentication).
 
 Service-principal / unattended auth against the resource-query endpoint is a known platform
 limitation (the request is forwarded to Azure Resource Graph, which currently expects an
@@ -227,7 +226,7 @@ to Kusto and runs against Azure Resource Graph:
   loop and marks the report incomplete when it bites.
 
 Exact request/response mechanics and the pitfalls resolved during implementation are in
-[CHANGELOG.md](CHANGELOG.md).
+[CHANGELOG.md](../../CHANGELOG.md).
 
 ### 6.5 Output
 
@@ -248,7 +247,7 @@ All runtime knobs come from the shared settings file (`ppx.settings.psd1`, secti
 cap (`MaxPages`, default `0` = retrieve everything), auth mode, output path, and whether to export the
 report at all (`ExportReport`, default `$true` — set to `$false` to only build and return the shaped
 rows in memory). Precedence is explicit parameter → settings file → tool/API default. See
-[SETTINGS.md](SETTINGS.md).
+[SETTINGS.md](../../SETTINGS.md).
 
 Note: `ExportReport` is a boolean whose *default* is `$true`, so an explicit `$false` in the settings
 file must be distinguishable from "not set." `Get-PPXSettings` therefore only drops `$null`, `''`, and

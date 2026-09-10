@@ -7,7 +7,7 @@ function Set-PPXCopilotCreditTenantPoolDraw {
     .DESCRIPTION
         Third tool in the PPX collection and the first that writes. Same shape and approach as the
         other tools: delegated Az token -> Power Platform API -> shape -> CSV plus a .limitations.txt
-        sidecar. See PPXCopilotCreditTenantPool.md (repo root) for the full design.
+        sidecar. See PPXCopilotCreditTenantPool.md (in this tool's folder) for the full design.
 
         Per environment:
           1. GET  https://api.powerplatform.com/licensing/allocationsByEnvironment/{id}

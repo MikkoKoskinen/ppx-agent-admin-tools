@@ -11,6 +11,22 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are 
 
 ## [Unreleased]
 
+### Documentation — per-tool solution descriptions moved into their tool folders
+
+The three tool-level solution / high-level technical descriptions moved from the repo root into the
+folder of the tool they document, next to that tool's `README.md`:
+
+- `PPXAgentGovernanceBaseline.md` → `tools/agent-governance-baseline/PPXAgentGovernanceBaseline.md`
+- `PPXCustomConnectorUsage.md` → `tools/custom-connector-usage/PPXCustomConnectorUsage.md`
+- `PPXCopilotCreditTenantPool.md` → `tools/copilot-credit-tenant-pool/PPXCopilotCreditTenantPool.md`
+
+File names are unchanged, so section anchors (`#5-report-schema`, …) still resolve. All cross-links
+updated: each moved doc now points at `../../SETTINGS.md` / `../../CHANGELOG.md` and its sibling
+`README.md`; each tool `README.md` points at its sibling solution doc (no more `../../`); the root
+**`README.md`** tool list and repository-layout tree point into the tool folders. The `.ps1` header
+comments that read "(repo root)" now say the doc lives in the tool's own folder. Earlier changelog
+entries keep the old root paths as the historical record.
+
 ### New tool — Copilot Credit — Tenant Pool Draw
 
 `Set-PPXCopilotCreditTenantPoolDraw` (`tools/copilot-credit-tenant-pool/`): sets the Copilot Credit
