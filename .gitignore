@@ -9,3 +9,6 @@ Debug-*.ps1
 
 # Generated tenant-specific reports (CSV + limitations sidecar)
 /reports/
+
+#Gitleaks scan output (config .gitleaks.toml IS committed - shared rule tuning)
+/gitleaks-report.json

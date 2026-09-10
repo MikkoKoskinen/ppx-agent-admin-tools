@@ -1,0 +1,18 @@
+# gitleaks configuration - committed so every contributor, pre-commit hook, and
+# CI pipeline scans with the same rules and allowlist.
+#
+# Run:  gitleaks detect --source . --config .gitleaks.toml --report-path gitleaks-report.json
+#
+# The scan output (gitleaks-report.json) is gitignored; this config is not.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+  [rules.allowlist]
+  description = "Microsoft first-party Power Platform API resource/app ID - public, documented in Microsoft Learn, not a secret"
+  regexes = [
+    '''8578e004-a5c6-46e7-913e-12f58912df43''',
+  ]
