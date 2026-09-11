@@ -3,12 +3,14 @@ function ConvertTo-PPXGovernanceRow {
     .SYNOPSIS
         Shapes one joined Inventory API record into a flat governance-baseline row.
     .DESCRIPTION
-        See PPXAgentGovernanceBaseline.md §5 for the base schema. This pass populates everything
-        derivable from the Inventory API response itself (Connect-PPXInventoryApi) -- no Graph, DLP,
-        or connector-catalog lookups. Columns whose source is one of those unimplemented steps
-        (Resolve-PPXOwnerIdentity, Get-PPXDlpCoverageFlag, Resolve-PPXConnectorTier) are emitted as
-        an explicit empty string, never $false/0/'Unknown', so a blank can never be misread as a
-        real negative finding.
+        See PPXAgentGovernanceBaseline.md §5 for the base schema. Most columns are derivable from the
+        Inventory API response itself (Connect-PPXInventoryApi); OwnerName/OwnerUPN/OwnerAccountStatus
+        are read off ownerName/ownerUPN/ownerAccountStatus, attached onto each record by the entry
+        point's client-side join to Resolve-PPXOwnerIdentity's Graph lookup (same pattern as the
+        environment join -- see Get-PPXAgentGovernanceBaseline.ps1). Columns whose source is a still-
+        unimplemented step (Get-PPXDlpCoverageFlag, Resolve-PPXConnectorTier) are emitted as an
+        explicit empty string, never $false/0/'Unknown', so a blank can never be misread as a real
+        negative finding.
 
         Field paths below were confirmed against a live tenant response (2026-09-03) except where
         noted "inferred" -- those are still best-effort. See CHANGELOG.md for the confirmation pass.
@@ -100,10 +102,10 @@ function ConvertTo-PPXGovernanceRow {
             IsManagedEnvironment  = Get-PPXNestedValue $Record 'isManagedEnvironment' -Default ''
             EnvironmentGroup      = ''   # not projected by the current Inventory API query -- see known limitations
 
-            # --- Ownership (Graph resolution not implemented yet -- raw IDs only) --------
-            OwnerName             = ''   # requires Resolve-PPXOwnerIdentity -- not implemented yet
-            OwnerUPN              = ''   # requires Resolve-PPXOwnerIdentity -- not implemented yet
-            OwnerAccountStatus    = ''   # requires Resolve-PPXOwnerIdentity -- not implemented yet
+            # --- Ownership (Graph resolution via Resolve-PPXOwnerIdentity, client-side join) ---
+            OwnerName             = Get-PPXNestedValue $Record 'ownerName' -Default ''
+            OwnerUPN              = Get-PPXNestedValue $Record 'ownerUPN' -Default ''
+            OwnerAccountStatus    = Get-PPXNestedValue $Record 'ownerAccountStatus' -Default ''
             OwnerId               = Get-PPXNestedValue $properties 'ownerId' -Default ''
 
             # --- Lifecycle -----------------------------------------------------------------
