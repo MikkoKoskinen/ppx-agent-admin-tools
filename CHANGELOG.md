@@ -11,6 +11,51 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are 
 
 ## [Unreleased]
 
+### Agent Governance Baseline — owner identity resolution (`Resolve-PPXOwnerIdentity`)
+
+`OwnerName` / `OwnerUPN` / `OwnerAccountStatus` are no longer blank placeholders — the third of the
+five originally-stubbed columns is now implemented, following the same client-side-join pattern
+`Resolve-PPXEnvironmentLookup` established for `EnvironmentName`/`EnvironmentType`.
+
+- **`tools/agent-governance-baseline/private/Resolve-PPXOwnerIdentity.ps1`** (was a stub) — batch-
+  resolves the distinct `ownerId` GUIDs collected across all agent records via Microsoft Graph's
+  `POST /v1.0/directoryObjects/getByIds`, in chunks of up to 1000 ids (the endpoint's documented
+  cap), rather than one Graph call per agent or the 20-request cap of the generic `$batch` endpoint.
+  `types: ['user', 'servicePrincipal']` covers both possible owner kinds without needing to guess
+  which one an id is first. Auth reuses the same delegated Az PowerShell token pattern as
+  `Connect-PPXInventoryApi.ps1` — a second `Get-AzAccessToken -ResourceUrl https://graph.microsoft.com`
+  call against the Inventory API's already-signed-in Az context, so no separate sign-in or Microsoft
+  Graph module is required. `OwnerAccountStatus` resolves to `Active` / `Disabled` / `NotFound` (id no
+  longer resolves to a directory object — a leaver/orphan signal in its own right) / `GraphError` (the
+  Graph call itself failed this run, distinct from a genuine not-found so it isn't misreported as one).
+  A 401 mid-run triggers one token refresh + retry, mirroring `Connect-PPXInventoryApi.ps1`'s handling
+  of a token outliving a long paging run.
+- **`Get-PPXAgentGovernanceBaseline.ps1`** — after the environment join, collects the distinct
+  `properties.ownerId` values, calls `Resolve-PPXOwnerIdentity`, and attaches `ownerName` / `ownerUPN`
+  / `ownerAccountStatus` onto each agent record client-side (same `Add-Member -Force` pattern as the
+  environment join), so `ConvertTo-PPXGovernanceRow.ps1` reads them off the record instead of emitting
+  a hardcoded blank.
+- **`ConvertTo-PPXGovernanceRow.ps1`**, **`Export-PPXReport.ps1`**, **`PPXAgentGovernanceBaseline.md`**
+  — updated for the above; the `.limitations.txt` sidecar's "blank by design" note for these three
+  columns is replaced with an explanation of the `NotFound`/`GraphError` status values.
+- **Follow-up: no-owner placeholder for Microsoft-shipped managed agents.** A live 2-page run showed
+  agents like `D365 Sales - Data Enrichment` have no individual owner — a blank `OwnerName` would
+  then be indistinguishable from a real data gap. `Get-PPXAgentGovernanceBaseline.ps1` now gives
+  these an explicit placeholder instead of leaving them blank.
+- **Follow-up-to-the-follow-up: the placeholder never showed up.** The first version of the fix keyed
+  "no owner" off `ownerId` being blank. Live data showed that's wrong: managed agents like
+  `D365 Sales - Data Enrichment` still carry a real-looking `ownerId` (e.g. an all-zero sentinel GUID)
+  that `Resolve-PPXOwnerIdentity` dutifully looked up and got back a genuine (if unhelpful)
+  `NotFound` — so every managed-agent row fell through to the "resolved" branch with a blank
+  `OwnerName`/`OwnerUPN` and `OwnerAccountStatus = 'NotFound'` instead of ever reaching the
+  placeholder branch, and none showed the placeholder at all. **Fix:** the decision is now
+  `properties.isManaged` (`IsManagedAgent`, confirmed field — see §8), not `ownerId` content.
+  `Get-PPXAgentGovernanceBaseline.ps1` excludes managed agents from the Graph batch entirely and
+  assigns `OwnerName = "Microsoft (managed agent)"` / `OwnerAccountStatus = "NotApplicable"` directly;
+  a non-managed agent with a genuinely blank `ownerId` gets `OwnerName = "(no owner)"` /
+  `OwnerAccountStatus = "NotApplicable"` the same way it always did. `OwnerUPN` stays blank in both
+  cases; `OwnerId` is unchanged (nothing to normalise there).
+
 ### Agent Governance Baseline — `skipToken` is non-functional for this API, plus a token-expiry crash
 
 A run against a large tenant (thousands of agents) hit `Failed to acquire OBO token` after ~30

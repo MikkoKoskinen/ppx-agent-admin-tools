@@ -144,8 +144,60 @@ No tenant ID configured. This tool never ships with a tenant baked in — set yo
         Write-Warning "$unmatchedCount of $($records.Count) agent record(s) had no matching environment (unpublished/blank environmentId, or the environment lookup above was incomplete) -- their EnvironmentName/EnvironmentType/IsManagedEnvironment columns will be blank."
     }
 
+    write-Host "..resolve agent owner identities (Microsoft Graph, batched)."
+
+    # Microsoft-shipped managed-solution agents (msdyn_* schema names, properties.isManaged = True --
+    # confirmed, see PPXAgentGovernanceBaseline.md §8) have no individual owner -- but some still
+    # carry a real-looking (e.g. all-zero sentinel) ownerId rather than a blank one, which Graph will
+    # never resolve. Deciding "no owner" from IsManagedAgent rather than from ownerId content is what
+    # actually catches those: skip them from the Graph batch entirely and never let them fall through
+    # to a "resolved" (but blank) result.
+    $ownerIds = @(
+        $records |
+            Where-Object { -not [bool] (Get-PPXNestedValue $_ 'properties.isManaged' -Default $false) } |
+            ForEach-Object { Get-PPXNestedValue $_ 'properties.ownerId' -Default '' } |
+            Where-Object { $_ }
+    )
+    $ownerParams = @{}
+    if ($TenantId) { $ownerParams['TenantId'] = $TenantId }
+    if ($UseDeviceAuthentication) { $ownerParams['UseDeviceAuthentication'] = $true }
+    $ownerLookup = $ownerIds | Resolve-PPXOwnerIdentity @ownerParams
+    Write-Host "Resolved $($ownerLookup.Count) distinct owner identity(ies) via Microsoft Graph."
+
+    $managedAgentCount = 0
+    $noOwnerIdCount = 0
+    foreach ($record in $records) {
+        $isManagedAgent = [bool] (Get-PPXNestedValue $record 'properties.isManaged' -Default $false)
+        if ($isManagedAgent) {
+            $managedAgentCount++
+            $record | Add-Member -NotePropertyName 'ownerName' -NotePropertyValue 'Microsoft (managed agent)' -Force
+            $record | Add-Member -NotePropertyName 'ownerUPN' -NotePropertyValue '' -Force
+            $record | Add-Member -NotePropertyName 'ownerAccountStatus' -NotePropertyValue 'NotApplicable' -Force
+            continue
+        }
+
+        $ownerId = Get-PPXNestedValue $record 'properties.ownerId' -Default ''
+        $owner = if ($ownerId) { $ownerLookup[$ownerId] } else { $null }
+        if ($owner) {
+            $record | Add-Member -NotePropertyName 'ownerName' -NotePropertyValue $owner.OwnerName -Force
+            $record | Add-Member -NotePropertyName 'ownerUPN' -NotePropertyValue $owner.OwnerUPN -Force
+            $record | Add-Member -NotePropertyName 'ownerAccountStatus' -NotePropertyValue $owner.OwnerAccountStatus -Force
+        }
+        else {
+            $noOwnerIdCount++
+            $record | Add-Member -NotePropertyName 'ownerName' -NotePropertyValue '(no owner)' -Force
+            $record | Add-Member -NotePropertyName 'ownerUPN' -NotePropertyValue '' -Force
+            $record | Add-Member -NotePropertyName 'ownerAccountStatus' -NotePropertyValue 'NotApplicable' -Force
+        }
+    }
+    if ($managedAgentCount -gt 0) {
+        Write-Host "$managedAgentCount of $($records.Count) agent record(s) are Microsoft-shipped managed agents (IsManagedAgent = True) -- OwnerName is set to 'Microsoft (managed agent)' and OwnerAccountStatus to 'NotApplicable'; not sent to Graph."
+    }
+    if ($noOwnerIdCount -gt 0) {
+        Write-Host "$noOwnerIdCount of $($records.Count) non-managed agent record(s) have no ownerId to resolve -- OwnerName is set to '(no owner)' and OwnerAccountStatus to 'NotApplicable'."
+    }
+
     # TODO: Patch 1 step 2 — Resolve-PPXConnectorTier (connector catalog + premium count)
-    # TODO: Patch 1 step 3 — Resolve-PPXOwnerIdentity (batched Graph lookups)
     # TODO: Patch 1 step 4 — Get-PPXDlpCoverageFlag (DLP coverage boolean)
 
     if ($ExportReport) {

@@ -4,10 +4,10 @@ Solution and high-level technical description for the **Agent Governance Baselin
 run it, see [README.md](README.md) in this folder; for settings and authentication,
 [SETTINGS.md](../../SETTINGS.md); for the technical change history, [CHANGELOG.md](../../CHANGELOG.md).
 
-**Status:** experimental. Inventory API connectivity, schema assembly, and CSV export are implemented
-and working. Owner resolution, DLP coverage, and connector-tier resolution are not built yet, so five
-columns are blank in every row, and a few other columns use unverified best-guess field paths — see
-[Implementation status](#implementation-status).
+**Status:** experimental. Inventory API connectivity, schema assembly, CSV export, and owner
+resolution (Microsoft Graph) are implemented and working. DLP coverage and connector-tier resolution
+are not built yet, so two columns are blank in every row, and a few other columns use unverified
+best-guess field paths — see [Implementation status](#implementation-status).
 
 ---
 
@@ -89,9 +89,9 @@ kept despite being in the same review groups.
 
 | Column | Source | Notes |
 | --- | --- | --- |
-| `OwnerName` / `OwnerUPN` | Microsoft Graph lookup on `ownerId` | Blank — `Resolve-PPXOwnerIdentity` not implemented yet |
-| `OwnerAccountStatus` | Microsoft Graph lookup | Blank — same as above. Active / Disabled / NotFound is the leaver/orphan signal once implemented |
-| `OwnerId` | Inventory `properties.ownerId` | confirmed. Raw GUID, usable before Graph resolution exists |
+| `OwnerName` / `OwnerUPN` | Microsoft Graph `directoryObjects/getByIds` lookup on `ownerId`, batched (`Resolve-PPXOwnerIdentity`) | `OwnerUPN` is blank for a service-principal-owned agent (SPs have no UPN). `OwnerName` is `"Microsoft (managed agent)"` for any record with `IsManagedAgent = True` (never sent to Graph — some still carry a real-looking sentinel `ownerId` that would otherwise resolve to a misleading blank `NotFound`) or `"(no owner)"` for a non-managed record with a blank `ownerId` — neither is a Graph lookup result |
+| `OwnerAccountStatus` | Microsoft Graph lookup | `Active` / `Disabled` / `NotFound` (id no longer resolves — leaver/orphan signal) / `GraphError` (the Graph call itself failed this run) / `NotApplicable` (managed agent, or no `ownerId` to resolve) |
+| `OwnerId` | Inventory `properties.ownerId` | confirmed. Raw GUID, always populated regardless of Graph resolution outcome; blank for agents with no individual owner |
 
 ### Lifecycle
 
@@ -171,7 +171,7 @@ Get-PPXAgentGovernanceBaseline            entry point (tools/agent-governance-ba
  ├─ Resolve-PPXEnvironmentLookup  same API, environments alone; entry point
  │                                joins the two client-side                    [implemented]
  ├─ Resolve-PPXConnectorTier    connector catalog lookup, cached per run       [planned]
- ├─ Resolve-PPXOwnerIdentity    batched Microsoft Graph lookups, cached per run [planned]
+ ├─ Resolve-PPXOwnerIdentity    batched Microsoft Graph lookups (getByIds)     [implemented]
  ├─ Get-PPXDlpCoverageFlag      wraps Get-AdminDlpPolicy / connector configs    [planned]
  └─ Export-PPXReport            flat table out (CSV / Excel), + limitations block [planned]
 ```
@@ -187,14 +187,20 @@ hundreds of agents. The whole run is idempotent and read-only.
 | --- | --- |
 | **Power Platform Inventory API** — `POST /resourcequery/resources/query` | Primary: agent records (own query), environment records (own query, joined client-side), connector-usage array |
 | **Connector catalog** — `microsoft.powerplatformconnector/connectors` via the same API | Resolves connector tier (Standard / Premium) for the premium sub-count |
-| **Microsoft Graph** — user lookups | Resolves `ownerId` to display name / UPN and account status |
+| **Microsoft Graph** — `POST /v1.0/directoryObjects/getByIds`, batches of up to 1000 ids | Resolves `ownerId` (user or service principal) to display name / UPN and account status |
 | **DLP policy data** — `Get-AdminDlpPolicy` / connector configuration cmdlets (classic admin module) | Computes the single "zero DLP coverage" boolean per agent |
 
 ### 6.3 Authentication
 
 Interactive **delegated** (user) authentication, obtained through **Az PowerShell**:
 `Connect-AzAccount` (only when there is no usable Az context) then
-`Get-AzAccessToken -ResourceUrl https://api.powerplatform.com`.
+`Get-AzAccessToken -ResourceUrl https://api.powerplatform.com`. `Resolve-PPXOwnerIdentity` reuses the
+same signed-in Az context and requests a second token for `https://graph.microsoft.com` the same way,
+so owner resolution needs no separate sign-in or Microsoft Graph module — it assumes whatever scopes
+are already consented for the Az PowerShell client are sufficient to read directory objects (true for
+most accounts that can also browse users in Entra). If that assumption doesn't hold in a given tenant,
+every owner lookup for the run falls back to `OwnerAccountStatus = 'GraphError'` with a single
+warning, rather than failing the whole report.
 
 The Power Platform API publishes no sample public client, and its resource application ID cannot be
 used as a client ID (doing so yields `AADSTS90009`). The tool therefore borrows the already-consented
@@ -285,10 +291,10 @@ numeric `0` as "unset" placeholders — `$false` is kept as a real value.
 | --- | --- |
 | Settings resolution, tenant enforcement, orchestration skeleton | Done |
 | `Connect-PPXInventoryApi` — auth + agents/environments query | Done; follows `skipToken` paging to retrieve all records, returns synthesised envelope + `data[]` |
-| Schema assembly (§5) incl. calculated columns | Done for Inventory-sourced/calculated columns (37 of 43 columns populated); `EnvironmentGroup`, `OwnerName`/`OwnerUPN`/`OwnerAccountStatus`, `PremiumConnectorCount`, `HasZeroDlpCoverage` are blank pending the steps below |
+| Schema assembly (§5) incl. calculated columns | Done for Inventory-sourced/calculated/Graph-sourced columns (40 of 43 columns populated); `EnvironmentGroup`, `PremiumConnectorCount`, `HasZeroDlpCoverage` are blank pending the steps below |
 | `Export-PPXReport` — CSV + `.limitations.txt` sidecar | Done |
 | `Resolve-PPXConnectorTier` | Not started (stub) — feeds `PremiumConnectorCount` |
-| `Resolve-PPXOwnerIdentity` | Not started (stub) — feeds `OwnerName`/`OwnerUPN`/`OwnerAccountStatus` (raw `OwnerId`/`CreatedByUserId` GUIDs are already included) |
+| `Resolve-PPXOwnerIdentity` | Done — batched `directoryObjects/getByIds` lookup (up to 1000 ids/request), reuses the delegated Az token pattern against `graph.microsoft.com`; feeds `OwnerName`/`OwnerUPN`/`OwnerAccountStatus`. Entry point joins the result onto each record client-side, same pattern as the environment join |
 | `Get-PPXDlpCoverageFlag` | Not started (stub) — feeds `HasZeroDlpCoverage` |
 
 Build order so far: Inventory API connectivity → Inventory-only schema assembly and CSV export →
@@ -335,7 +341,8 @@ Stated here and, once export exists, in every report run:
 - PowerShell 5.1+ (Windows PowerShell) or 7.x
 - `Az.Accounts` — Inventory API sign-in and token acquisition
 - `Microsoft.PowerApps.Administration.PowerShell` — DLP coverage flag (once implemented)
-- Microsoft Graph PowerShell SDK or direct Graph REST — owner resolution (once implemented)
+- Microsoft Graph — owner resolution, via direct REST (`directoryObjects/getByIds`) using the same
+  delegated Az PowerShell token as the Inventory API; no separate Microsoft Graph SDK/module required
 - Permissions: Power Platform Administrator (or Dynamics 365 Service Administrator); must have signed
   into PPAC at least once
 
