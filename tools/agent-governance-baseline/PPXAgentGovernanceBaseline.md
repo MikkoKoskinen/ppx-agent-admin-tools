@@ -79,11 +79,11 @@ kept despite being in the same review groups.
 | `AgentName` | Inventory `properties.displayName` | confirmed |
 | `AgentId` | Inventory `name` | |
 | `SchemaName` | Inventory `properties.schemaName` | confirmed |
-| `EnvironmentName` | Inventory, environment join | |
+| `EnvironmentName` | Inventory, environment lookup (client-side join) | |
 | `EnvironmentId` | Inventory `properties.environmentId` | confirmed |
-| `EnvironmentType` | Inventory, environment join | Production / Sandbox / Trial / Developer / Default / Dataverse-for-Teams |
-| `IsManagedEnvironment` | Inventory, environment join | |
-| `EnvironmentGroup` | Inventory, environment join | Blank — not currently projected by the query, see §8 |
+| `EnvironmentType` | Inventory, environment lookup (client-side join) | Production / Sandbox / Trial / Developer / Default / Dataverse-for-Teams |
+| `IsManagedEnvironment` | Inventory, environment lookup (client-side join) | |
+| `EnvironmentGroup` | Inventory, environment lookup (client-side join) | Blank — not currently projected by the query, see §8 |
 
 ### Ownership
 
@@ -167,7 +167,9 @@ factually wrong. `ChannelsCount`/`Channels` replace it.
 ```
 Get-PPXAgentGovernanceBaseline            entry point (tools/agent-governance-baseline/)
  ├─ Connect-PPXInventoryApi     acquire token, POST resourcequery/resources/query
- │                              (agents + environments joined in one query)   [implemented]
+ │                              (agents alone -- no server-side join)          [implemented]
+ ├─ Resolve-PPXEnvironmentLookup  same API, environments alone; entry point
+ │                                joins the two client-side                    [implemented]
  ├─ Resolve-PPXConnectorTier    connector catalog lookup, cached per run       [planned]
  ├─ Resolve-PPXOwnerIdentity    batched Microsoft Graph lookups, cached per run [planned]
  ├─ Get-PPXDlpCoverageFlag      wraps Get-AdminDlpPolicy / connector configs    [planned]
@@ -183,7 +185,7 @@ hundreds of agents. The whole run is idempotent and read-only.
 
 | Source | Role |
 | --- | --- |
-| **Power Platform Inventory API** — `POST /resourcequery/resources/query` | Primary: agent records, environment join, connector-usage array |
+| **Power Platform Inventory API** — `POST /resourcequery/resources/query` | Primary: agent records (own query), environment records (own query, joined client-side), connector-usage array |
 | **Connector catalog** — `microsoft.powerplatformconnector/connectors` via the same API | Resolves connector tier (Standard / Premium) for the premium sub-count |
 | **Microsoft Graph** — user lookups | Resolves `ownerId` to display name / UPN and account status |
 | **DLP policy data** — `Get-AdminDlpPolicy` / connector configuration cmdlets (classic admin module) | Computes the single "zero DLP coverage" boolean per agent |
@@ -212,18 +214,42 @@ to Kusto and runs against Azure Resource Graph:
 
 - `POST https://api.powerplatform.com/resourcequery/resources/query?api-version=2024-10-01`
 - Body: `{ TableName: "PowerPlatformResources", Options: { Top, Skip, SkipToken }, Clauses: [ … ] }`.
-- `Clauses` is an ordered list of typed operations (`extend`, `join`, `where`, `project`,
-  `orderby`, …); the `$type` discriminator must be the first property of each clause object.
-- The baseline query mirrors PPAC's own default pattern: derive a lowercased environment join key,
-  `leftouter`-join every resource to its environment record, then filter to
-  `microsoft.copilotstudio/agents`, ordered by creation date (with a `name` tie-breaker so
-  `skipToken` paging is deterministic).
-- Response envelope: `{ totalRecords, count, resultTruncated, skipToken, data[] }`.
-- **Paging**: Azure Resource Graph returns at most 1000 rows per request plus a `skipToken` when
-  more remain. `Connect-PPXInventoryApi` loops, feeding each `skipToken` back into
-  `Options.SkipToken`, until none is returned — so tenants with more than 1000 agents are fully
-  retrieved. `Top` is the per-request page size only; `MaxPages` (default 0 = unlimited) caps the
-  loop and marks the report incomplete when it bites.
+- `Clauses` is an ordered list of typed operations (`where`, `orderby`, …); the `$type`
+  discriminator must be the first property of each clause object.
+- **Two independent queries, joined client-side — not a server-side join.** An earlier version
+  mirrored PPAC's own default pattern (derive a lowercased environment join key, `leftouter`-join
+  every resource to its environment record, then filter to `microsoft.copilotstudio/agents`). Against
+  a large tenant that run returned 758,000+ joined rows for 5,530 real agents (confirmed against the
+  PPAC UI) before failing on token expiry. The join was the first suspect, but removing it alone did
+  **not** fix the symptom — the true cause (below) also broke the agents-only query. It's kept
+  removed anyway as a real efficiency/robustness win: `Connect-PPXInventoryApi` now queries agents
+  alone (filtered to `microsoft.copilotstudio/agents`, one row per agent, no join evaluated per
+  page), and `Resolve-PPXEnvironmentLookup.ps1` queries `microsoft.powerplatform/environments` alone
+  the same way. `Get-PPXAgentGovernanceBaseline` joins the two client-side, keyed on
+  `properties.environmentId`.
+- **Root cause: `Options.SkipToken` is non-functional for this query/tenant.** Two theories were
+  tried and ruled out first: a suspected volatile-sort-key issue (the query originally ordered by
+  `tostring(properties.createdAt) desc, name asc`, newest first, matching PPAC's own UI default —
+  switching to `name` alone, an immutable GUID, did **not** fix it either) and the server-side join
+  (removing it did **not** fix it either — see above). A live A/B/C/D diagnostic pull settled it:
+  requesting page 2 by echoing back the server's own `skipToken` (`Skip=0, SkipToken=<token from
+  page 1>`) returned **page 1 again, byte-for-byte** (0 of 1,000 rows different, repeatable across 3
+  consecutive pages), while requesting `Skip=1000` with an empty `SkipToken` returned a fully
+  disjoint page (2,000 of 2,000 rows different). `skipToken` was making zero real forward progress
+  regardless of sort key or join — explaining the original 758,000-row run, the follow-up
+  397,000-row run, and the 142,000-row run after the sort-key fix. **Fix:** `Connect-PPXInventoryApi`
+  no longer uses `skipToken` for continuation at all. It pages with plain `Options.Skip` offsets
+  (`page * pageSize`, confirmed live to advance correctly), stopping when a page returns fewer rows
+  than requested — standard offset-paging termination.
+- Response envelope: `{ totalRecords, count, resultTruncated, skipToken, data[] }` (the `skipToken`
+  field is still present in the raw API response but is no longer used or returned by this function
+  — `Connect-PPXInventoryApi`'s own return envelope always reports `skipToken = $null`).
+- **Paging**: Azure Resource Graph returns at most 1000 rows per request. `Connect-PPXInventoryApi`
+  loops, incrementing `Options.Skip` by the page size each time, until a page comes back with fewer
+  rows than requested — so tenants with more than 1000 agents (or environments) are fully retrieved.
+  `Top` is the per-request page size only; `MaxPages` (default 0 = unlimited) caps the loop and marks
+  the report incomplete when it bites. A delegated token that outlives a long run (401, or a 400 with
+  an OBO/AADSTS complaint in the body) is refreshed once and the failed request retried.
 
 Exact request/response mechanics and the pitfalls resolved during implementation are in
 [CHANGELOG.md](../../CHANGELOG.md).
@@ -298,6 +324,11 @@ Stated here and, once export exists, in every report run:
 - Several source fields are Microsoft **Preview** status and may change shape without notice.
 - Authentication is interactive delegated only; unattended auth is not supported against this
   endpoint at time of writing.
+- **Microsoft-shipped managed-solution agents are not filtered out.** Agents such as
+  `msdyn_SalesIntentEngage` (`IsManagedAgent = True`) are auto-provisioned into every Dynamics
+  365-enabled environment and appear as one row per environment. They're real Inventory API records,
+  not a duplication bug, but they aren't user-created agents — filter the CSV on
+  `IsManagedAgent = False`/blank if the baseline should cover custom agents only.
 
 ## 9. Dependencies
 

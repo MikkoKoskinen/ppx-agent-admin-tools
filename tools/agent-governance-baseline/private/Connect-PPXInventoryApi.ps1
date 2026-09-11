@@ -12,20 +12,21 @@ $script:PPXInventoryApiBaseUri     = 'https://api.powerplatform.com/resourcequer
 $script:PPXInventoryApiVersion     = '2024-10-01'
 
 # Azure Resource Graph caps a single page at 1000 rows regardless of a larger Options.Top, so a
-# tenant with more agents than that is only fully retrieved by following the skipToken continuation.
+# tenant with more agents than that is only fully retrieved by following Skip-offset paging (see
+# Connect-PPXInventoryApi's .DESCRIPTION for why Options.SkipToken isn't used for this).
 $script:PPXInventoryApiMaxPageSize = 1000
 
-# Safety net: stop following skipToken after this many requests even if the service keeps handing
-# one back, so a service-side paging bug can never spin this function forever. At 1000 rows/page
-# this is 5,000,000 agent records — far beyond any real tenant.
+# Safety net: stop paging after this many requests even if every page keeps coming back full, so a
+# pathological query (or a tenant that's simply enormous) can't spin this function forever. At 1000
+# rows/page this is 5,000,000 agent records — far beyond any real tenant.
 $script:PPXInventoryApiHardPageCap = 5000
 
 function Connect-PPXInventoryApi {
     <#
     .SYNOPSIS
         Acquires a delegated token for the Power Platform Inventory API and queries Copilot Studio
-        (V2) agent resources joined with their environments, following skipToken paging until every
-        record has been retrieved.
+        (V2) agent resources (by default) or a caller-supplied resource query, following Skip-offset
+        paging until every record has been retrieved.
     .DESCRIPTION
         Wraps POST https://api.powerplatform.com/resourcequery/resources/query.
 
@@ -36,15 +37,30 @@ function Connect-PPXInventoryApi {
         limitation (the request is forwarded to Azure Resource Graph, which currently expects an
         On-Behalf-Of flow) — not implemented here, see PPXAgentGovernanceBaseline.md § 6.3.
 
-        Paging: Azure Resource Graph returns at most 1000 rows per request and a `skipToken` when
-        more remain. This function loops, feeding each response's skipToken back into
-        Options.SkipToken, until the service stops returning one (or -MaxPages / the hard safety cap
-        is hit). The returned envelope is synthesised from all pages: `data` holds every record,
-        `count` is the full retrieved total, and `resultTruncated` is $true only if the loop stopped
-        before the service said it was done.
+        Paging: Azure Resource Graph returns at most 1000 rows per request. This function loops,
+        incrementing Options.Skip by the page size each time, until a page comes back with fewer
+        rows than requested (or -MaxPages / the hard safety cap is hit). The returned envelope is
+        synthesised from all pages: `data` holds every record, `count` is the full retrieved total,
+        and `resultTruncated` is $true only if the loop stopped before the service said it was done.
 
-        Returns the raw deserialized resource records (agents + environments). No shaping, joining,
-        or column calculation is performed here — that happens in the assembly step of the caller.
+        **`Options.SkipToken` is not used for continuation** -- see the paging-loop comment below for
+        why: against this tenant/query it proved non-functional (echoing it back always re-returned
+        page 1), confirmed by a live A/B/C/D diagnostic pull. `Options.Skip` (plain offset paging)
+        was confirmed live to advance correctly and is what's used instead.
+
+        Returns the raw deserialized resource records. No shaping or column calculation is performed
+        here — that happens in the assembly step of the caller.
+
+        The query no longer joins agents to environments server-side. Against a large tenant a run
+        with the join returned 758,000+ rows for 5,530 real agents before failing on token expiry;
+        the join was the first suspect, but removing it alone did **not** fix the symptom (a
+        follow-up run with no join still hit 397,000+ rows at page 397, identical growth pattern),
+        nor did switching the sort key from the volatile `createdAt` to the immutable `name` (still
+        100% duplicate pages). The join's removal is kept anyway: it's still a real
+        efficiency/robustness improvement (one row per agent per page instead of a join evaluated on
+        every page), and Resolve-PPXEnvironmentLookup.ps1 now pulls environments as its own
+        independent query, joined client-side by the entry point — matching the no-server-join
+        pattern already used by the custom-connector-usage and copilot-credit-tenant-pool tools.
     .PARAMETER TenantId
         Optional Entra tenant ID. If an Az context for a different tenant is already active, a new
         interactive Connect-AzAccount is forced for this tenant.
@@ -60,6 +76,11 @@ function Connect-PPXInventoryApi {
         Sign in with device-code flow (a code + URL to complete in any browser) instead of the
         interactive browser/WAM prompt. Needed when the browser prompt cannot render — e.g. running
         inside the VS Code debugger / PowerShell Integrated Console, where WAM silently hangs.
+    .PARAMETER Clauses
+        Optional. Overrides the baked-in Copilot Studio (V2) agents query with a caller-supplied
+        KQLOM clause array (typed `$type` clause objects, each an [ordered] hashtable so the
+        discriminator serialises first). Used by Resolve-PPXEnvironmentLookup.ps1 to run the
+        environment-list query through the same paging/auth machinery.
     #>
     [CmdletBinding()]
     param(
@@ -69,32 +90,38 @@ function Connect-PPXInventoryApi {
 
         [int] $MaxPages,
 
+        [object[]] $Clauses,
+
         [switch] $UseDeviceAuthentication
     )
 
-    $context = Get-AzContext
-    if (-not $context -or ($TenantId -and $context.Tenant.Id -ne $TenantId)) {
-        $connectParams = @{ ErrorAction = 'Stop' }
-        if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-        if ($UseDeviceAuthentication) { $connectParams['UseDeviceAuthentication'] = $true }
+    # Acquired once up front and again (via $acquireToken) whenever a long run outlives the token --
+    # see the retry-on-failure handling in the paging loop below.
+    $acquireToken = {
+        $context = Get-AzContext
+        if (-not $context -or ($TenantId -and $context.Tenant.Id -ne $TenantId)) {
+            $connectParams = @{ ErrorAction = 'Stop' }
+            if ($TenantId) { $connectParams['TenantId'] = $TenantId }
+            if ($UseDeviceAuthentication) { $connectParams['UseDeviceAuthentication'] = $true }
 
-        Write-Verbose 'No usable Az context; signing in with Connect-AzAccount.'
-        $null = Connect-AzAccount @connectParams
-    }
+            Write-Verbose 'No usable Az context; signing in with Connect-AzAccount.'
+            $null = Connect-AzAccount @connectParams
+        }
 
-    Write-Verbose "Requesting a delegated token for $script:PPXInventoryApiResourceUrl"
-    $tokenResponse = Get-AzAccessToken -ResourceUrl $script:PPXInventoryApiResourceUrl -ErrorAction Stop
+        Write-Verbose "Requesting a delegated token for $script:PPXInventoryApiResourceUrl"
+        $tokenResponse = Get-AzAccessToken -ResourceUrl $script:PPXInventoryApiResourceUrl -ErrorAction Stop
 
-    # Az.Accounts 5.x returns Token as a SecureString by default; older versions return a plain string.
-    $accessToken = if ($tokenResponse.Token -is [System.Security.SecureString]) {
-        [System.Net.NetworkCredential]::new('', $tokenResponse.Token).Password
-    }
-    else {
-        $tokenResponse.Token
+        # Az.Accounts 5.x returns Token as a SecureString by default; older versions return a plain string.
+        if ($tokenResponse.Token -is [System.Security.SecureString]) {
+            [System.Net.NetworkCredential]::new('', $tokenResponse.Token).Password
+        }
+        else {
+            $tokenResponse.Token
+        }
     }
 
     $headers = @{
-        Authorization = "Bearer $accessToken"
+        Authorization = "Bearer $(& $acquireToken)"
         'Content-Type' = 'application/json'
     }
 
@@ -106,19 +133,45 @@ function Connect-PPXInventoryApi {
     # Query request per the inventory API contract (typed clauses, not a KQL/SQL string):
     #   https://learn.microsoft.com/en-us/power-platform/admin/inventory-api
     #   https://learn.microsoft.com/en-us/power-platform/admin/inventory-schema
-    # Mirrors the Power Platform admin center default pattern: left-join every resource to its
-    # environment record, then filter to Copilot Studio (V2) agents. Agent-side fields are returned
-    # whole for now (no project clause) — column selection / §5 shaping is a later build step.
     #
     # Every clause object is [ordered] so that '$type' serialises as the FIRST property. The service
     # deserialises Clauses polymorphically (System.Text.Json), which requires the type discriminator
     # to lead the object; a plain @{} hashtable has no key order and yields
     # "KQLOM format is wrong or it cannot be null".
     #
-    # The orderby carries a `name` tie-breaker after createdAt: skipToken paging in Azure Resource
-    # Graph is only stable when the sort is fully deterministic. `name` is the resource's unique id,
-    # so this guarantees no row is skipped or repeated between pages when many agents share a
-    # createdAt value.
+    # No server-side join to environments here (see .DESCRIPTION): filter to Copilot Studio (V2)
+    # agents only, one row per agent. Agent-side fields are returned whole (no project clause) —
+    # column selection / §5 shaping is a later build step.
+    #
+    # orderby `name` (the agent's immutable GUID resource id) alone -- NOT createdAt. An earlier
+    # version ordered `tostring(properties.createdAt) desc, name asc` (newest first, matching PPAC's
+    # own UI default) on a theory that a volatile sort key (this tenant creates agents continuously)
+    # was breaking pagination; switching to `name` alone did NOT fix it either (paging turned out to
+    # be broken regardless of sort key -- see the Options.Skip comment below for the actual root
+    # cause). `name asc` is kept anyway: paging is now plain Skip-offset based, which requires a
+    # deterministic sort for consecutive pages to line up correctly, and an immutable GUID is the
+    # safest choice (a new agent created mid-run can't shift already-fetched pages the way a
+    # createdAt-desc sort could).
+    $defaultClauses = @(
+        [ordered]@{
+            '$type'   = 'where'
+            FieldName = 'type'
+            Operator  = 'in~'
+            Values    = @("'microsoft.copilotstudio/agents'")
+        }
+        [ordered]@{
+            '$type'           = 'orderby'
+            FieldNamesAscDesc = [ordered]@{
+                'name' = 'asc'
+            }
+        }
+    )
+
+    # Options.SkipToken is deliberately left '' and never populated from the response: a live A/B/C/D
+    # diagnostic against this API proved it non-functional for this query -- echoing the server's own
+    # skipToken back (Skip=0, SkipToken=<token>) returned page 1 again byte-for-byte (0 rows different
+    # across 2,000+ record(s)/3 pages), while plain Options.Skip=1000 (SkipToken='') returned a fully
+    # disjoint page (2,000 rows different from page 1). Skip-offset paging is what actually works here.
     $options = [ordered]@{
         Top       = $pageSize
         Skip      = 0
@@ -127,53 +180,7 @@ function Connect-PPXInventoryApi {
     $query = [ordered]@{
         TableName = 'PowerPlatformResources'
         Options   = $options
-        Clauses   = @(
-            [ordered]@{
-                '$type'    = 'extend'
-                FieldName  = 'joinKey'
-                Expression = 'tolower(tostring(properties.environmentId))'
-            }
-            [ordered]@{
-                '$type'    = 'join'
-                JoinKind   = 'leftouter'
-                RightTable = [ordered]@{
-                    TableName = 'PowerPlatformResources'
-                    Clauses   = @(
-                        [ordered]@{
-                            '$type'   = 'where'
-                            FieldName = 'type'
-                            Operator  = '=='
-                            Values    = @("'microsoft.powerplatform/environments'")
-                        }
-                        [ordered]@{
-                            '$type'   = 'project'
-                            FieldList = @(
-                                'joinKey = tolower(name)'
-                                'environmentName = properties.displayName'
-                                'environmentType = properties.environmentType'
-                                'isManagedEnvironment = properties.isManaged'
-                                'environmentRegion = location'
-                            )
-                        }
-                    )
-                }
-                LeftColumnName  = 'joinKey'
-                RightColumnName = 'joinKey'
-            }
-            [ordered]@{
-                '$type'   = 'where'
-                FieldName = 'type'
-                Operator  = 'in~'
-                Values    = @("'microsoft.copilotstudio/agents'")
-            }
-            [ordered]@{
-                '$type'           = 'orderby'
-                FieldNamesAscDesc = [ordered]@{
-                    'tostring(properties.createdAt)' = 'desc'
-                    'name'                           = 'asc'
-                }
-            }
-        )
+        Clauses   = if ($Clauses) { $Clauses } else { $defaultClauses }
     }
 
     $uri = "${script:PPXInventoryApiBaseUri}?api-version=${script:PPXInventoryApiVersion}"
@@ -181,29 +188,50 @@ function Connect-PPXInventoryApi {
     $allRecords      = [System.Collections.Generic.List[object]]::new()
     $page            = 0
     $lastTotalRecords = 0
-    $pendingSkipToken = $null
+    $morePagesLikely  = $false
+    $tokenRefreshed   = $false
 
     do {
         $page++
         $body = $query | ConvertTo-Json -Depth 20
 
-        try {
-            $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body
-        }
-        catch {
-            # PowerShell 7 puts the response body in ErrorDetails.Message; 5.1 needs the response stream.
-            $detail = $_.ErrorDetails.Message
-            if (-not $detail -and $_.Exception.Response) {
-                try {
-                    $stream = $_.Exception.Response.GetResponseStream()
-                    $reader = [System.IO.StreamReader]::new($stream)
-                    $detail = $reader.ReadToEnd()
-                }
-                catch {
-                    # Best-effort only; fall through with $detail still $null.
-                }
+        $response = $null
+        while ($true) {
+            try {
+                $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -ErrorAction Stop
+                break
             }
-            throw "Power Platform Inventory API request failed on page $page ($($_.Exception.Message)).`n$detail"
+            catch {
+                # PowerShell 7 puts the response body in ErrorDetails.Message; 5.1 needs the response stream.
+                $detail = $_.ErrorDetails.Message
+                if (-not $detail -and $_.Exception.Response) {
+                    try {
+                        $stream = $_.Exception.Response.GetResponseStream()
+                        $reader = [System.IO.StreamReader]::new($stream)
+                        $detail = $reader.ReadToEnd()
+                    }
+                    catch {
+                        # Best-effort only; fall through with $detail still $null.
+                    }
+                }
+
+                $status = $null
+                try { $status = [int] $_.Exception.Response.StatusCode } catch { }
+
+                # A run against a large tenant can span tens of minutes and outlive the delegated
+                # token: the service then fails the request while trying to exchange it
+                # on-behalf-of the caller (401, or 400 with an OBO/AADSTS complaint in the body).
+                # Refresh once and retry before giving up.
+                $isAuthFailure = ($status -eq 401) -or ($detail -match 'OBO token|AADSTS')
+                if ($isAuthFailure -and -not $tokenRefreshed) {
+                    $tokenRefreshed = $true
+                    Write-Verbose "Auth failure from Inventory API on page $page (status $status); refreshing token and retrying."
+                    $headers['Authorization'] = "Bearer $(& $acquireToken)"
+                    continue
+                }
+
+                throw "Power Platform Inventory API request failed on page $page ($($_.Exception.Message)).`n$detail"
+            }
         }
 
         $pageRecords = @($response.data)
@@ -211,11 +239,16 @@ function Connect-PPXInventoryApi {
 
         if ($null -ne $response.totalRecords) { $lastTotalRecords = [int64] $response.totalRecords }
 
-        $pendingSkipToken = if ([string]::IsNullOrEmpty([string] $response.skipToken)) { $null } else { [string] $response.skipToken }
+        # A full page (row count == the requested page size) means there's likely more; a short page
+        # (fewer rows than requested, including zero) means we've reached the real end of the data --
+        # the standard offset-paging termination condition. (response.skipToken is intentionally
+        # ignored here -- see the .DESCRIPTION and the comment above $options.)
+        $morePagesLikely = $pageRecords.Count -ge $pageSize
 
-        Write-Verbose "Inventory API page ${page}: +$($pageRecords.Count) record(s); running total $($allRecords.Count) of $lastTotalRecords; more pages: $([bool] $pendingSkipToken)."
+        Write-Verbose "Inventory API page ${page}: +$($pageRecords.Count) record(s); running total $($allRecords.Count) of $lastTotalRecords; more pages: $morePagesLikely."
+        if ($page % 10 -eq 0) { Write-Host "    ...page $page, $($allRecords.Count) record(s) so far." }
 
-        if (-not $pendingSkipToken) { break }
+        if (-not $morePagesLikely) { break }
 
         if ($MaxPages -gt 0 -and $page -ge $MaxPages) {
             Write-Warning "Stopped after $page page(s): -MaxPages $MaxPages reached with $($allRecords.Count) of $lastTotalRecords record(s) retrieved. The report will be marked INCOMPLETE."
@@ -226,13 +259,14 @@ function Connect-PPXInventoryApi {
             break
         }
 
-        $query.Options.SkipToken = $pendingSkipToken
+        $query.Options.Skip = $page * $pageSize
     } while ($true)
 
     $data = $allRecords.ToArray()
 
-    # Defensive de-dup: deterministic ordering plus skipToken should never repeat a row across pages,
-    # but if the service ever does, one row per agent still holds. Key on `id`, falling back to `name`.
+    # Defensive de-dup: deterministic ordering plus Skip-offset paging should never repeat a row
+    # across pages, but if the service ever does, one row per agent still holds. Key on `id`,
+    # falling back to `name`.
     $dedupKey = if ($data.Count -and $data[0].PSObject.Properties['id']) { 'id' }
                 elseif ($data.Count -and $data[0].PSObject.Properties['name']) { 'name' }
                 else { $null }
@@ -249,15 +283,16 @@ function Connect-PPXInventoryApi {
         }
     }
 
-    # resultTruncated is true only if we bailed out with a continuation token still pending
-    # (-MaxPages or the hard cap), or the service reported more records than we actually got back.
-    $incomplete = [bool] $pendingSkipToken -or ($lastTotalRecords -gt 0 -and $data.Count -lt $lastTotalRecords)
+    # resultTruncated is true only if we bailed out while a page was still full (-MaxPages or the
+    # hard cap, with more likely remaining), or the service reported more records than we actually
+    # got back.
+    $incomplete = $morePagesLikely -or ($lastTotalRecords -gt 0 -and $data.Count -lt $lastTotalRecords)
 
     return [PSCustomObject]@{
         totalRecords    = $lastTotalRecords
         count           = $data.Count
         resultTruncated = $incomplete
-        skipToken       = $pendingSkipToken
+        skipToken       = $null
         pagesRetrieved  = $page
         data            = $data
     }

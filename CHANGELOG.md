@@ -11,6 +11,63 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are 
 
 ## [Unreleased]
 
+### Agent Governance Baseline — `skipToken` is non-functional for this API, plus a token-expiry crash
+
+A run against a large tenant (thousands of agents) hit `Failed to acquire OBO token` after ~30
+minutes / 758 pages, having already returned 758,000+ rows for a tenant the PPAC UI confirmed has
+5,530 real agents. Two independent defects, both fixed:
+
+- **Root cause: `Options.SkipToken` never advances — confirmed with a live A/B/C/D test.** Three
+  theories were chased and ruled out in turn: a server-side `leftouter` join from agents to
+  environments (removed — see below — but a follow-up run with no join *still* hit 397,000+ rows at
+  page 397, same growth pattern); ordering by the volatile `tostring(properties.createdAt) desc, name
+  asc` (matching PPAC's own UI default — switched to `name` alone, an immutable GUID — but a further
+  run *still* hit 142,000+ rows at page 142). A live diagnostic settled it: requesting "page 2" by
+  echoing the server's own `skipToken` back (`Skip=0, SkipToken=<token from page 1>`) returned page 1
+  again byte-for-byte (0 of 1,000 rows different, reproduced across 3 consecutive pages — `Dropped
+  2000 duplicate record(s) ... keyed on 'id'` for a 3-page/MaxPages 3 pull), while requesting
+  `Skip=1000` with an empty `SkipToken` returned a fully disjoint page (2,000 of 2,000 rows
+  different). `skipToken` makes zero real forward progress for this query/tenant, independent of sort
+  key or join. **Fix:** `Connect-PPXInventoryApi` no longer uses `skipToken` for continuation.
+  It now pages with plain `Options.Skip` offsets (`page * pageSize`, confirmed live to advance
+  correctly), stopping when a page returns fewer rows than requested. The function's own return
+  envelope always reports `skipToken = $null` now (the field stays in the shape for compatibility).
+- **Server-side join removed (kept even though it wasn't the root cause).**
+  `Connect-PPXInventoryApi.ps1` `leftouter`-joined every agent to its environment record inside the
+  Inventory API query. Removing it didn't fix the paging bug above, but it's still a real
+  efficiency/robustness win (one row per agent per page, no join evaluated on every page), so it
+  stayed removed. `Connect-PPXInventoryApi` now queries `microsoft.copilotstudio/agents` alone and
+  gained a `-Clauses` override so callers can run a different query through the same paging/auth
+  machinery. New `private/Resolve-PPXEnvironmentLookup.ps1` queries
+  `microsoft.powerplatform/environments` alone (no `project` clause, matching the no-project shape
+  already proven in the custom-connector-usage/copilot-credit-tenant-pool tools) and returns a lookup
+  keyed on lowercased environment ID. `Get-PPXAgentGovernanceBaseline.ps1` now runs both queries and
+  joins them client-side (`properties.environmentId` → the lookup), attaching `environmentName` /
+  `environmentType` / `isManagedEnvironment` onto each agent record exactly as the old server-side
+  join did, so `ConvertTo-PPXGovernanceRow.ps1` needed no changes. A `-MaxPages`-truncated or
+  otherwise incomplete environment pull is now surfaced as its own warning, separate from an
+  incomplete agent pull.
+- **Token expiry on long runs.** The same delegated token, acquired once at the very start, was
+  reused for the whole run; after ~30 minutes it was too stale for `api.powerplatform.com`'s backend
+  to complete its on-behalf-of exchange to Azure Resource Graph, surfacing as `400 Bad Request:
+  Failed to acquire OBO token`. This is the same class of failure documented below under "Custom
+  Connector Usage — bring-up fixes", whose fix (`Connect-PPXInventoryApi` / `Get-PPXEnvironmentConnector`
+  retrying once on a token-expiry failure) was never backported to this tool's own copy of
+  `Connect-PPXInventoryApi.ps1`. **Fix:** token acquisition is now a reusable scriptblock; on an HTTP
+  401, or an HTTP 400 whose body mentions `OBO token`/`AADSTS`, the token is refreshed and the request
+  retried once before giving up.
+- **Aside — `isManaged` and per-environment duplicate schema names.** While diagnosing, the raw feed
+  showed schema names like `msdyn_SalesIntentEngage` and
+  `msdyn_CustomerServiceKnowledgeHarvestingExternalSources` each repeating dozens of times (once per
+  environment, `properties.isManaged = True`, different `environmentId` each time) — Microsoft-shipped
+  managed-solution agents auto-provisioned per Dynamics 365-enabled environment, not user-created
+  agents. These are real, correctly-returned rows (not a duplication bug) and are included in the
+  report as-is for now; whether to filter them out of the governance baseline is a follow-up product
+  decision, not addressed by this fix.
+- **`tools/agent-governance-baseline/private/Connect-PPXInventoryApi.ps1`**,
+  **`private/Resolve-PPXEnvironmentLookup.ps1`** (new), **`Get-PPXAgentGovernanceBaseline.ps1`**,
+  **`PPXAgentGovernanceBaseline.md`** — updated for the above.
+
 ### Tooling — gitleaks secret scanning
 
 Secret and internal-identifier scanning is now part of the workflow, sharing one committed config

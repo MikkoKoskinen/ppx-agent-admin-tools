@@ -74,9 +74,11 @@ Get-PPXAgentGovernanceBaseline -ExportReport:$false
 Get-PPXAgentGovernanceBaseline -MaxPages 1
 ```
 
-**Large tenants:** the Inventory API returns at most 1000 rows per request. The tool follows the
-`skipToken` continuation automatically and retrieves every agent, however many there are — `-Top`
-(or `AgentGovernanceBaseline.Top`) only sets the per-request page size, it does not cap the total.
+**Large tenants:** the Inventory API returns at most 1000 rows per request. The tool pages through
+every request automatically (via `Options.Skip` offsets — the API's `skipToken` continuation proved
+non-functional against this endpoint and isn't used, see [CHANGELOG.md](../../CHANGELOG.md)) and
+retrieves every agent and every environment, however many there are — `-Top` (or
+`AgentGovernanceBaseline.Top`) only sets the per-request page size, it does not cap the total.
 `-MaxPages` / `AgentGovernanceBaseline.MaxPages` (default `0` = unlimited) can cap the paging loop;
 when it does, the `.limitations.txt` sidecar marks the report **INCOMPLETE**.
 
@@ -115,6 +117,12 @@ obtained and the alternative app-registration approach.
 - `CapabilitiesTruncated` compares the actual `powerPlatformConnectors` array length against the
   reported distinct-connector count (`capabilitiesCounts.distinctPowerPlatformConnectors`) — Microsoft
   does not document an exact truncation cap, so this is a relative signal, not a fixed threshold.
+- **Microsoft-shipped managed-solution agents are included, not filtered out.** Agents like
+  `msdyn_SalesIntentEngage` (`properties.isManaged = True`) get auto-provisioned into every
+  Dynamics 365-enabled environment and show up as one row per environment — they aren't user-created
+  agents, but the Inventory API returns them alongside real ones and this tool doesn't currently
+  distinguish them. If your governance baseline should only cover custom/user-created agents, filter
+  the exported CSV on `IsManagedAgent = False` (or blank) until an explicit filter is built in.
 - Every run's specific gaps (including the above) are restated in the `.limitations.txt` file written
   alongside the CSV, so the report is self-describing without needing this README.
 

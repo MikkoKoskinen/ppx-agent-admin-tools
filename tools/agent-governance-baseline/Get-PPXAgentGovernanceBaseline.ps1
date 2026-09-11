@@ -113,6 +113,37 @@ No tenant ID configured. This tool never ships with a tenant baked in — set yo
         Write-Warning "Inventory API result is INCOMPLETE ($($records.Count) of $($inventory.totalRecords) retrieved). Re-run without -MaxPages / AgentGovernanceBaseline.MaxPages for a full report."
     }
 
+    write-Host "..get environment listing (for the environment name/type/managed columns)."
+
+    $environmentResult = Resolve-PPXEnvironmentLookup @connectParams
+    $envLookup = $environmentResult.Lookup
+    Write-Host "Inventory API returned $($envLookup.Count) of $($environmentResult.Inventory.totalRecords) environment record(s) across $($environmentResult.Inventory.pagesRetrieved) page(s)."
+    if ($environmentResult.Inventory.resultTruncated) {
+        Write-Warning "Environment lookup is INCOMPLETE ($($envLookup.Count) of $($environmentResult.Inventory.totalRecords) retrieved) -- some agents' EnvironmentName/EnvironmentType/IsManagedEnvironment will be blank even though they belong to a real environment."
+    }
+
+    # Client-side join: the Inventory API query no longer joins agents to environments server-side
+    # (it fanned out badly against a large tenant -- see Connect-PPXInventoryApi.ps1's .DESCRIPTION),
+    # so attach the same fields the old join projected onto each agent record here instead.
+    # ConvertTo-PPXGovernanceRow reads them off the record top-level (environmentName / environmentType
+    # / isManagedEnvironment), matching what the join used to produce.
+    $unmatchedCount = 0
+    foreach ($record in $records) {
+        $environmentId = Get-PPXNestedValue $record 'properties.environmentId' -Default ''
+        $env = if ($environmentId) { $envLookup[$environmentId] } else { $null }
+        if ($env) {
+            $record | Add-Member -NotePropertyName 'environmentName' -NotePropertyValue $env.environmentName -Force
+            $record | Add-Member -NotePropertyName 'environmentType' -NotePropertyValue $env.environmentType -Force
+            $record | Add-Member -NotePropertyName 'isManagedEnvironment' -NotePropertyValue $env.isManagedEnvironment -Force
+        }
+        else {
+            $unmatchedCount++
+        }
+    }
+    if ($unmatchedCount -gt 0) {
+        Write-Warning "$unmatchedCount of $($records.Count) agent record(s) had no matching environment (unpublished/blank environmentId, or the environment lookup above was incomplete) -- their EnvironmentName/EnvironmentType/IsManagedEnvironment columns will be blank."
+    }
+
     # TODO: Patch 1 step 2 — Resolve-PPXConnectorTier (connector catalog + premium count)
     # TODO: Patch 1 step 3 — Resolve-PPXOwnerIdentity (batched Graph lookups)
     # TODO: Patch 1 step 4 — Get-PPXDlpCoverageFlag (DLP coverage boolean)
