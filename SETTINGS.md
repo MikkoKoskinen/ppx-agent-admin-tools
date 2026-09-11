@@ -91,8 +91,8 @@ Get-PPXAgentGovernanceBaseline -Top 50         # Top = 50 (override); TenantId s
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `TenantId` | string | *(inherits `Common`)* | Override the tenant for just this tool. |
-| `Top` | int | `0` | Rows fetched **per Inventory API request** (1–1000; higher is clamped — the API returns at most 1000 per page). `0` = default (1000). Does **not** cap the total: the tool follows `skipToken` paging until every agent record is retrieved. |
-| `MaxPages` | int | `0` | Safety cap on how many Inventory API pages (requests) to follow. `0` = no cap (retrieve everything). Set a small value for a quick partial pull while testing — the report is then flagged **INCOMPLETE** in its `.limitations.txt` sidecar. |
+| `Top` | int | `0` | Rows fetched **per Inventory API request** (1–1000; higher is clamped — the API returns at most 1000 per page). `0` = default (1000). Does **not** cap the total: the tool pages via `Options.Skip` offsets until every agent record (and, separately, every environment record) is retrieved — `skipToken` proved non-functional against this endpoint and isn't used, see [CHANGELOG.md](CHANGELOG.md). |
+| `MaxPages` | int | `0` | Safety cap on how many Inventory API pages (requests) to follow, applied to both the agent pull and the environment pull. `0` = no cap (retrieve everything). Set a small value for a quick partial pull while testing — the report is then flagged **INCOMPLETE** in its `.limitations.txt` sidecar. |
 | `OutputPath` | string | `''` | Where the CSV report (+ `.limitations.txt` sidecar) is written. A folder path auto-names a timestamped file into it; a path ending in `.csv` is used as-is. `''` = the repo-root `reports\` folder (git-ignored). |
 | `ExportReport` | bool | `$true` | Whether to write the CSV report to disk. `$false` = only build and return the shaped rows in memory, write nothing to disk. |
 
