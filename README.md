@@ -4,6 +4,8 @@ Independent open-source tools, scripts, and small apps that extend Power Platfor
 administration and governance capabilities, built on Power Platform's programmability and
 extensibility APIs.
 
+<img width="1632" height="1054" alt="image" src="https://github.com/user-attachments/assets/38b6a88c-c608-4c44-8936-a163e696ea6d" />
+
 Each tool is self-contained under `tools/<name>/`, with its own usage README and a solution/technical
 description. This root README is the landing page — status, quick start, and shared configuration.
 
