@@ -6,8 +6,9 @@ run it, see [README.md](README.md) in this folder; for settings and authenticati
 
 **Status:** experimental. Inventory API connectivity, schema assembly, CSV export, and owner
 resolution (Microsoft Graph) are implemented and working. DLP coverage and connector-tier resolution
-are not built yet, so two columns are blank in every row, and a few other columns use unverified
-best-guess field paths — see [Implementation status](#implementation-status).
+are not built yet, and `EnvironmentGroup` isn't projected by the query, so three columns
+(`PremiumConnectorCount`, `HasZeroDlpCoverage`, `EnvironmentGroup`) are blank in every row, and a few
+other columns use unverified best-guess field paths — see [Implementation status](#implementation-status).
 
 ---
 
@@ -255,7 +256,8 @@ to Kusto and runs against Azure Resource Graph:
   rows than requested — so tenants with more than 1000 agents (or environments) are fully retrieved.
   `Top` is the per-request page size only; `MaxPages` (default 0 = unlimited) caps the loop and marks
   the report incomplete when it bites. A delegated token that outlives a long run (401, or a 400 with
-  an OBO/AADSTS complaint in the body) is refreshed once and the failed request retried.
+  an OBO/AADSTS complaint in the body) is refreshed and the failed request retried once *per page* —
+  not once for the whole run — so a pull spanning multiple token lifetimes keeps recovering.
 
 Exact request/response mechanics and the pitfalls resolved during implementation are in
 [CHANGELOG.md](../../CHANGELOG.md).
@@ -290,7 +292,7 @@ numeric `0` as "unset" placeholders — `$false` is kept as a real value.
 | Component | State |
 | --- | --- |
 | Settings resolution, tenant enforcement, orchestration skeleton | Done |
-| `Connect-PPXInventoryApi` — auth + agents/environments query | Done; follows `skipToken` paging to retrieve all records, returns synthesised envelope + `data[]` |
+| `Connect-PPXInventoryApi` — auth + agents/environments query | Done; follows Skip-offset paging to retrieve all records, returns synthesised envelope + `data[]` |
 | Schema assembly (§5) incl. calculated columns | Done for Inventory-sourced/calculated/Graph-sourced columns (40 of 43 columns populated); `EnvironmentGroup`, `PremiumConnectorCount`, `HasZeroDlpCoverage` are blank pending the steps below |
 | `Export-PPXReport` — CSV + `.limitations.txt` sidecar | Done |
 | `Resolve-PPXConnectorTier` | Not started (stub) — feeds `PremiumConnectorCount` |
@@ -323,6 +325,7 @@ Stated here and, once export exists, in every report run:
 - `CapabilitiesTruncated` flags when the actual `powerPlatformConnectors` array returned is shorter
   than the reported distinct-connector count; Microsoft does not document an exact cap.
 - Up to ~15 minutes of replication latency between a real-world change and inventory reflecting it.
+- **Paging uses a plain `Options.Skip` offset, not a continuation token** (see §6.4/`Connect-PPXInventoryApi.ps1`): an agent created, or resorted ahead of the current page by the `name asc` sort, while a run is still paging can shift a later page and be silently skipped without `resultTruncated` being set. Accepted trade-off — `SkipToken` proved non-functional against this API/query (§6.4) — and expected to be rare given how much more slowly the agent set changes than a single run's paging window.
 - `HasZeroDlpCoverage` is a coverage boolean, not policy detail — not a substitute for a DLP audit.
 - `Channels`/`Triggers`/`Flows` list basic identifiers only (and their item shape is unconfirmed for
   populated arrays — only empty examples have been seen); full publishing-channel configuration

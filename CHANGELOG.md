@@ -11,6 +11,64 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are 
 
 ## [Unreleased]
 
+### Agent Governance Baseline — PR review hardening (paging, owner resolution, environment truncation)
+
+Automated PR review (GitHub Copilot) on the paging-fix and owner-resolution changes below flagged
+several real defects and a batch of documentation that had drifted from the code as those two
+features landed. Fixed:
+
+- **`Connect-PPXInventoryApi.ps1` — token refresh was only recoverable once for the entire run.**
+  `$tokenRefreshed` was declared once before the paging loop, so only the *first* 401/OBO failure in
+  a run got refreshed; a large-tenant pull spanning multiple token lifetimes would hard-abort on the
+  second expiry despite the paging loop itself having plenty of pages left to go. **Fix:** the flag
+  now resets at the top of every page, giving each page its own one-retry allowance (mirrors the
+  per-batch reset `Resolve-PPXOwnerIdentity.ps1` already had).
+- **`Resolve-PPXOwnerIdentity.ps1` — a failed Graph batch mislabeled unrelated, successfully-resolved
+  ids.** `$graphErrorSeen` was a single run-wide flag: once *any* batch failed, every id left
+  unresolved at the end — including ones from other, successful batches — was labeled `GraphError`
+  instead of the correct `NotFound`, corrupting the leaver/orphan signal `OwnerAccountStatus` exists
+  to carry. **Fix:** failed ids are now tracked per chunk in a `$failedIds` set; only ids that
+  actually belonged to a failed batch get `GraphError`.
+- **`Resolve-PPXOwnerIdentity.ps1` — a failed token refresh mid-batch escaped the function.** The
+  one-time 401 retry called `$acquireGraphToken` directly inside the `catch` block with no guard; if
+  the refresh itself threw (e.g. a transient network failure), the exception propagated out of the
+  function and aborted the whole report instead of degrading just that batch to `GraphError`. **Fix:**
+  the refresh call is now wrapped in its own try/catch, routed through the same per-chunk failure path.
+- **`Resolve-PPXOwnerIdentity.ps1` — a Graph outage warned once per 1000-id batch, not once per run.**
+  The `.DESCRIPTION` already promised "a single warning is emitted"; a large tenant with Graph fully
+  down would instead get one `Write-Warning` per batch. **Fix:** gated behind a `$warnedGraphFailure`
+  flag so the run warns once, regardless of how many later batches also fail.
+- **`Get-PPXAgentGovernanceBaseline.ps1` — environment-lookup truncation wasn't persisted.**
+  `Export-PPXReport` only ever saw the agent inventory's `resultTruncated`; a run where the agent pull
+  completed but the independent environment pull hit `-MaxPages` only surfaced that gap as a console
+  `Write-Warning`, never in the `.limitations.txt` sidecar someone reads later. **Fix:**
+  `Export-PPXReport.ps1` gained `-EnvironmentInventory` / `-UnmatchedEnvironmentCount` parameters,
+  populated by the entry point, and now writes the same INCOMPLETE-style note for the environment
+  lookup that it already wrote for the agent inventory.
+- **`Get-PPXAgentGovernanceBaseline.ps1` — a whitespace-only `ownerId`/`environmentId` was treated as
+  present.** The environment and owner joins used a plain truthy check (`if ($ownerId)`), which is
+  `$true` for a whitespace-only string even though `Resolve-PPXOwnerIdentity`/
+  `Resolve-PPXEnvironmentLookup` both treat whitespace the same as blank and never give it a lookup
+  key. **Fix:** all three call sites now use `[string]::IsNullOrWhiteSpace()`, consistent with the
+  resolvers' own filtering.
+- **Documented, not changed: offset-paging under a moving result set.** `Options.Skip` is a position,
+  not a snapshot boundary — an agent inserted (or resorted ahead of the current page by the `name`
+  sort) while a run is still paging can shift a later page and be silently skipped without
+  `resultTruncated` ever being set. This is an inherent property of offset paging, accepted because
+  `SkipToken` (the alternative) doesn't work at all against this API/query (see the entry below) and
+  the agent set changes far more slowly than one run's paging window takes to complete. Called out in
+  `Connect-PPXInventoryApi.ps1`'s `.DESCRIPTION`, the persisted `.limitations.txt` (`Export-PPXReport.ps1`),
+  and `PPXAgentGovernanceBaseline.md` §8, so it reaches a report reader as well as the source.
+- **Documentation drift fixed**, all stale since the `skipToken` → `Options.Skip` migration or the
+  owner-resolution build-out below: `Connect-PPXInventoryApi.ps1`'s `-Top` help and a `Write-Verbose`
+  message still said "following skipToken"; `Export-PPXReport.ps1`'s persisted limitations text had
+  the same wording plus a dead `if ($Inventory.skipToken)` branch that could never fire (the envelope
+  always reports `skipToken = $null`); `Get-PPXAgentGovernanceBaseline.ps1`'s comment-based help still
+  said owner resolution "is not yet built" and all owner columns are blank; `PPXAgentGovernanceBaseline.md`
+  said "two columns are blank" where the implementation-status table lists three
+  (`PremiumConnectorCount`, `HasZeroDlpCoverage`, `EnvironmentGroup`), and its §6.4/implementation-status
+  text still described `skipToken` paging.
+
 ### Agent Governance Baseline — owner identity resolution (`Resolve-PPXOwnerIdentity`)
 
 `OwnerName` / `OwnerUPN` / `OwnerAccountStatus` are no longer blank placeholders — the third of the

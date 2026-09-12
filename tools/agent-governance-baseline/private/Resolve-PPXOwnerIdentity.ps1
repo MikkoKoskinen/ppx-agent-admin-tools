@@ -108,7 +108,14 @@ function Resolve-PPXOwnerIdentity {
 
         # https://learn.microsoft.com/en-us/graph/api/directoryobject-getbyids -- 1000 ids/request max.
         $batchSize = 1000
-        $graphErrorSeen = $false
+        # Failed ids are tracked per chunk (not one run-wide flag): a batch that fails must not cause
+        # unresolved ids from a *different, successful* batch to be mislabeled GraphError instead of
+        # the correct NotFound, which would corrupt the leaver/orphan signal that status feeds.
+        $failedIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        # A request-level Graph failure is warned about once per run (matching the .DESCRIPTION's "a
+        # single warning is emitted"), not once per failed 1000-id batch -- a large tenant with Graph
+        # down entirely would otherwise flood the run with a near-duplicate warning per batch.
+        $warnedGraphFailure = $false
         for ($i = 0; $i -lt $ids.Count; $i += $batchSize) {
             $chunk = $ids.GetRange($i, [Math]::Min($batchSize, $ids.Count - $i))
             $body = @{ ids = @($chunk); types = @('user', 'servicePrincipal') } | ConvertTo-Json -Depth 5
@@ -126,14 +133,27 @@ function Resolve-PPXOwnerIdentity {
 
                     if ($status -eq 401 -and -not $tokenRefreshed) {
                         $tokenRefreshed = $true
-                        Write-Verbose 'Graph token expired mid-run; refreshing and retrying once.'
-                        $headers['Authorization'] = "Bearer $(& $acquireGraphToken)"
-                        continue
+                        try {
+                            Write-Verbose 'Graph token expired mid-run; refreshing and retrying once.'
+                            $headers['Authorization'] = "Bearer $(& $acquireGraphToken)"
+                            continue
+                        }
+                        catch {
+                            if (-not $warnedGraphFailure) {
+                                $warnedGraphFailure = $true
+                                Write-Warning "Microsoft Graph token refresh failed mid-run ($($_.Exception.Message)) -- treating unresolved owner id(s) from this and any later failing batch as GraphError."
+                            }
+                            foreach ($failedId in $chunk) { $null = $failedIds.Add($failedId) }
+                            break
+                        }
                     }
 
-                    $detail = $_.ErrorDetails.Message
-                    Write-Warning "Microsoft Graph getByIds request failed for a batch of $($chunk.Count) owner id(s) ($($_.Exception.Message)). $detail"
-                    $graphErrorSeen = $true
+                    if (-not $warnedGraphFailure) {
+                        $warnedGraphFailure = $true
+                        $detail = $_.ErrorDetails.Message
+                        Write-Warning "Microsoft Graph getByIds request failed for a batch of $($chunk.Count) owner id(s) ($($_.Exception.Message)). $detail"
+                    }
+                    foreach ($failedId in $chunk) { $null = $failedIds.Add($failedId) }
                     break
                 }
             }
@@ -161,14 +181,14 @@ function Resolve-PPXOwnerIdentity {
 
         # Every requested id gets a result: one not returned by getByIds genuinely doesn't resolve to
         # a directory object (deleted, cross-tenant, or a bad guid) -- distinct from a request-level
-        # Graph failure, which is only flagged once via $graphErrorSeen/Write-Warning above rather
-        # than mislabeling every unresolved id as 'NotFound'.
+        # Graph failure, which is tracked per chunk in $failedIds so only ids from a failed batch are
+        # labeled GraphError; ids from other, successful batches still get the correct NotFound.
         foreach ($id in $ids) {
             if (-not $lookup.ContainsKey($id)) {
                 $lookup[$id] = [PSCustomObject]@{
                     OwnerName          = ''
                     OwnerUPN           = ''
-                    OwnerAccountStatus = if ($graphErrorSeen) { 'GraphError' } else { 'NotFound' }
+                    OwnerAccountStatus = if ($failedIds.Contains($id)) { 'GraphError' } else { 'NotFound' }
                 }
             }
         }

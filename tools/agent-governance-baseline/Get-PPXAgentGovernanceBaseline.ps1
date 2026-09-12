@@ -8,11 +8,12 @@ function Get-PPXAgentGovernanceBaseline {
         high-level technical description for the full schema and architecture:
         PPXAgentGovernanceBaseline.md (in this tool's folder).
 
-        Current state: Inventory API connectivity, schema assembly, and CSV export are implemented.
-        Connector-tier resolution, owner resolution, and the DLP coverage flag are not yet built, so
-        OwnerName/OwnerUPN/OwnerAccountStatus, PremiumConnectorCount, and HasZeroDlpCoverage are
-        blank in every row — see the inline TODOs, the private/ script headers, and the
-        known-limitations sidecar file written alongside every report.
+        Current state: Inventory API connectivity, schema assembly, CSV export, and owner resolution
+        (Microsoft Graph) are implemented. Connector-tier resolution and the DLP coverage flag are
+        not yet built, so PremiumConnectorCount and HasZeroDlpCoverage are blank in every row;
+        EnvironmentGroup is also blank (not currently projected by the Inventory API query) — see
+        the inline TODOs, the private/ script headers, and the known-limitations sidecar file
+        written alongside every report.
         Runtime values default from the shared settings file (ppx.settings.psd1 at the repo root,
         section 'AgentGovernanceBaseline'); an explicit parameter here overrides that file.
     .PARAMETER TenantId
@@ -21,8 +22,8 @@ function Get-PPXAgentGovernanceBaseline {
         is set; no tenant is ever baked into the repo.
     .PARAMETER Top
         Optional page size (rows per request, 1-1000) passed through to the Inventory API query.
-        This does not cap the total — the tool follows skipToken paging until every agent record has
-        been retrieved. Defaults to the settings file (AgentGovernanceBaseline.Top).
+        This does not cap the total — the tool follows Skip-offset paging until every agent record
+        has been retrieved. Defaults to the settings file (AgentGovernanceBaseline.Top).
     .PARAMETER MaxPages
         Optional cap on how many Inventory API pages to follow. 0 (default) means retrieve
         everything. Set a small value for a quick partial pull while testing; the report is then
@@ -130,7 +131,9 @@ No tenant ID configured. This tool never ships with a tenant baked in — set yo
     $unmatchedCount = 0
     foreach ($record in $records) {
         $environmentId = Get-PPXNestedValue $record 'properties.environmentId' -Default ''
-        $env = if ($environmentId) { $envLookup[$environmentId] } else { $null }
+        # A plain truthy check treats a whitespace-only value as "present" even though it can never
+        # be a real key, so it must be excluded the same way a blank one is.
+        $env = if (-not [string]::IsNullOrWhiteSpace($environmentId)) { $envLookup[$environmentId] } else { $null }
         if ($env) {
             $record | Add-Member -NotePropertyName 'environmentName' -NotePropertyValue $env.environmentName -Force
             $record | Add-Member -NotePropertyName 'environmentType' -NotePropertyValue $env.environmentType -Force
@@ -156,7 +159,10 @@ No tenant ID configured. This tool never ships with a tenant baked in — set yo
         $records |
             Where-Object { -not [bool] (Get-PPXNestedValue $_ 'properties.isManaged' -Default $false) } |
             ForEach-Object { Get-PPXNestedValue $_ 'properties.ownerId' -Default '' } |
-            Where-Object { $_ }
+            # A plain truthy filter keeps a whitespace-only value, but Resolve-PPXOwnerIdentity treats
+            # that the same as blank (IsNullOrWhiteSpace) and never gives it a lookup key -- match that
+            # here so it isn't sent to Graph as a distinct "id" that will never resolve.
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     )
     $ownerParams = @{}
     if ($TenantId) { $ownerParams['TenantId'] = $TenantId }
@@ -177,7 +183,7 @@ No tenant ID configured. This tool never ships with a tenant baked in — set yo
         }
 
         $ownerId = Get-PPXNestedValue $record 'properties.ownerId' -Default ''
-        $owner = if ($ownerId) { $ownerLookup[$ownerId] } else { $null }
+        $owner = if (-not [string]::IsNullOrWhiteSpace($ownerId)) { $ownerLookup[$ownerId] } else { $null }
         if ($owner) {
             $record | Add-Member -NotePropertyName 'ownerName' -NotePropertyValue $owner.OwnerName -Force
             $record | Add-Member -NotePropertyName 'ownerUPN' -NotePropertyValue $owner.OwnerUPN -Force
@@ -201,7 +207,11 @@ No tenant ID configured. This tool never ships with a tenant baked in — set yo
     # TODO: Patch 1 step 4 — Get-PPXDlpCoverageFlag (DLP coverage boolean)
 
     if ($ExportReport) {
-        $exportParams = @{ Inventory = $inventory }
+        $exportParams = @{
+            Inventory                 = $inventory
+            EnvironmentInventory      = $environmentResult.Inventory
+            UnmatchedEnvironmentCount = $unmatchedCount
+        }
         if ($OutputPath) { $exportParams['Path'] = $OutputPath }
 
         $result = Export-PPXReport @exportParams
