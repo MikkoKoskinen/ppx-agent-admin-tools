@@ -148,6 +148,23 @@ each script does; several are copied rather than shared across tools by design (
 - **Adding a setting or a new tool**: see the contributor sections in [SETTINGS.md](SETTINGS.md).
 - **Change history**: [CHANGELOG.md](CHANGELOG.md).
 
+# Decisions
+
+Lightweight decision records for non-obvious choices and bug investigations in the PPX tools. Each
+one covers what was tried, what was found, and why the final approach was chosen — the detail that
+doesn't belong in [`CHANGELOG.md`](../../CHANGELOG.md) but is worth having on hand the next time
+someone touches the same area.
+
+| # | Title |
+|---|---|
+| [0001](docs/0001-inventory-api-request-contract.md) | Inventory API request contract (KQLOM) |
+| [0002](docs/0002-authentication-az-accounts.md) | Authentication via Az.Accounts instead of MSAL.PS |
+| [0003](docs/0003-pagination-strategy.md) | Pagination strategy — `skipToken` vs. `Options.Skip` |
+| [0004](docs/0004-owner-resolution-and-managed-agent-placeholder.md) | Owner identity resolution and the managed-agent placeholder |
+| [0005](docs/0005-custom-connector-usage-data-sources.md) | Custom Connector Usage — data sources and paging bring-up |
+| [0006](docs/0006-settings-unset-vs-false.md) | Settings: distinguishing "unset" from an explicit `$false` |
+
+
 ## License
 
 [MIT](LICENSE)
