@@ -5,7 +5,7 @@ function Export-PPXReport {
         to a CSV, plus a sidecar known-limitations text file.
     .DESCRIPTION
         Takes the whole Inventory API response envelope (not just .data) because totalRecords /
-        resultTruncated / pagesRetrieved feed the limitations file: if skipToken paging was cut
+        resultTruncated / pagesRetrieved feed the limitations file: if Skip-offset paging was cut
         short (-MaxPages or the hard safety cap), the report would otherwise be silently incomplete.
 
         Writes two files rather than appending prose into the CSV: a plain CSV has no comment
@@ -15,6 +15,16 @@ function Export-PPXReport {
     .PARAMETER Inventory
         The response object returned by Connect-PPXInventoryApi, synthesised from all retrieved
         pages: { totalRecords, count, resultTruncated, skipToken, pagesRetrieved, data[] }.
+    .PARAMETER EnvironmentInventory
+        Optional. The same kind of envelope as -Inventory, but for the independent environment query
+        (Resolve-PPXEnvironmentLookup.Inventory). When its resultTruncated is $true, the environment
+        lookup was incomplete even if the agent inventory pull was not -- this is recorded in
+        .limitations.txt so the gap survives past the console warning printed at collection time.
+    .PARAMETER UnmatchedEnvironmentCount
+        Optional. Count of agent records that had no matching environment (unpublished/blank
+        environmentId, or an environmentId absent from a complete environment lookup), so their
+        EnvironmentName/EnvironmentType/IsManagedEnvironment columns are blank. Recorded in
+        .limitations.txt alongside -EnvironmentInventory.
     .PARAMETER Path
         Optional. A folder to auto-name a timestamped CSV into, or a full path ending in .csv.
         Defaults to the repo-root reports\ folder (git-ignored).
@@ -22,6 +32,10 @@ function Export-PPXReport {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] $Inventory,
+
+        $EnvironmentInventory,
+
+        [int] $UnmatchedEnvironmentCount,
 
         [string] $Path
     )
@@ -76,19 +90,26 @@ function Export-PPXReport {
         "Rows exported: $($rows.Count) of $($Inventory.totalRecords) total agent record(s) in the tenant."
     )
     if ($null -ne $Inventory.pagesRetrieved) {
-        $limitationsLines += "Inventory API pages retrieved (skipToken paging): $($Inventory.pagesRetrieved)."
+        $limitationsLines += "Inventory API pages retrieved (Skip-offset paging): $($Inventory.pagesRetrieved)."
     }
     $limitationsLines += ''
 
     if ($Inventory.resultTruncated) {
         $limitationsLines += "*** resultTruncated = true -- the Inventory API did not return every record for this query. This report is INCOMPLETE. ***"
-        if ($Inventory.skipToken) {
-            $limitationsLines += "Paging stopped early with a continuation token still pending -- most likely -MaxPages / AgentGovernanceBaseline.MaxPages capped the run. Re-run without that cap for a complete report."
-        }
+        $limitationsLines += "Paging stopped early -- most likely -MaxPages / AgentGovernanceBaseline.MaxPages capped the run, or the internal page safety cap was hit. Re-run without -MaxPages for a complete report."
         $limitationsLines += ''
     }
     elseif ($Inventory.totalRecords -and $rows.Count -lt [int64] $Inventory.totalRecords) {
         $limitationsLines += "NOTE: $($rows.Count) row(s) exported but the tenant reports $($Inventory.totalRecords) agent record(s). All pages were retrieved, so the difference is rows dropped during shaping (join/filter), not API truncation."
+        $limitationsLines += ''
+    }
+
+    if ($EnvironmentInventory -and $EnvironmentInventory.resultTruncated) {
+        $limitationsLines += "*** Environment lookup resultTruncated = true -- the environment query did not return every environment for this tenant. Some agents' EnvironmentName/EnvironmentType/IsManagedEnvironment will be blank even though they belong to a real environment. Re-run for a complete environment pull. ***"
+        $limitationsLines += ''
+    }
+    elseif ($UnmatchedEnvironmentCount -gt 0) {
+        $limitationsLines += "NOTE: $UnmatchedEnvironmentCount agent record(s) had no matching environment (unpublished/blank environmentId) -- their EnvironmentName/EnvironmentType/IsManagedEnvironment columns are blank."
         $limitationsLines += ''
     }
 
@@ -98,6 +119,7 @@ function Export-PPXReport {
         '- V1 / Classic (Power Virtual Agents) bots are excluded -- not present in the Inventory API.'
         '- The reported distinct connector count (capabilitiesCounts) is compared against the actual powerPlatformConnectors array to flag truncation (CapabilitiesTruncated); the exact cap, if any, is not documented by Microsoft.'
         '- Up to ~15 minutes of replication latency between a real-world change and inventory reflecting it.'
+        '- Paging uses a plain Skip offset, not a continuation token: an agent created (or resorted ahead of the current page) while this run was still paging can shift a later page and be silently skipped, without resultTruncated being set. Rare in practice, but a full row count that still looks off after a re-run can be this.'
         '- HasZeroDlpCoverage (when populated) is a coverage boolean only, not policy detail.'
         '- Channels/Triggers/Flows list basic identifiers only; full publishing-channel configuration detail is not available through this report.'
         '- Several source fields are Microsoft Preview status and may change shape without notice.'

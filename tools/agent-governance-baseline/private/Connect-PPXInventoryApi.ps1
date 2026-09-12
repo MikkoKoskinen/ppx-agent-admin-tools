@@ -48,6 +48,14 @@ function Connect-PPXInventoryApi {
         page 1), confirmed by a live A/B/C/D diagnostic pull. `Options.Skip` (plain offset paging)
         was confirmed live to advance correctly and is what's used instead.
 
+        **Known trade-off of offset paging:** unlike a real continuation token, `Options.Skip` is a
+        position, not a snapshot boundary. If an agent is created (or reordered ahead of the current
+        offset by the `name` sort) while a run is still paging, a later page can shift and one record
+        can be skipped without `resultTruncated` ever being set -- the loop only detects a page coming
+        back short, not a page that silently omitted a row because the underlying set moved under it.
+        Accepted here because `SkipToken` (the alternative) doesn't work at all against this API/query
+        (above), and rows change orders of magnitude more slowly than a single run's paging window.
+
         Returns the raw deserialized resource records. No shaping or column calculation is performed
         here — that happens in the assembly step of the caller.
 
@@ -127,7 +135,7 @@ function Connect-PPXInventoryApi {
 
     $pageSize = if ($Top -and $Top -gt 0) { [Math]::Min($Top, $script:PPXInventoryApiMaxPageSize) } else { $script:PPXInventoryApiMaxPageSize }
     if ($Top -and $Top -gt $script:PPXInventoryApiMaxPageSize) {
-        Write-Verbose "Requested -Top $Top exceeds the API's $($script:PPXInventoryApiMaxPageSize)-row page cap; using $pageSize per page and following skipToken for the rest."
+        Write-Verbose "Requested -Top $Top exceeds the API's $($script:PPXInventoryApiMaxPageSize)-row page cap; using $pageSize per page and following Skip-offset paging for the rest."
     }
 
     # Query request per the inventory API contract (typed clauses, not a KQL/SQL string):
@@ -189,11 +197,15 @@ function Connect-PPXInventoryApi {
     $page            = 0
     $lastTotalRecords = 0
     $morePagesLikely  = $false
-    $tokenRefreshed   = $false
 
     do {
         $page++
         $body = $query | ConvertTo-Json -Depth 20
+
+        # Reset per page (not once for the whole run): a large-tenant pull can span tens of minutes
+        # and outlive more than one token lifetime, so each page gets its own one-retry allowance
+        # instead of only the first expiry in the entire run being recoverable.
+        $tokenRefreshed = $false
 
         $response = $null
         while ($true) {
