@@ -25,11 +25,16 @@ id = "generic-api-key"
 # Custom rule: internal user handles that must not appear in committed content.
 # Targets the concatenated handle forms only - the dotted email address
 # (e.g. someone.name@example.com) is fine and is not matched.
+#
+# Case-sensitive on purpose: the GitHub org/repo owner "MikkoKoskinen" (PascalCase,
+# used throughout README/CHANGELOG links) is a public, intentional identifier and
+# must stay allowed. Only the all-lowercase "mikkokoskinen" / "mkoskinen" forms -
+# the O365 tenant handle - are treated as an internal handle worth blocking.
 # ---------------------------------------------------------------------------
 [[rules]]
 id = "ppx-internal-handle"
 description = "Internal user handle in committed content - use a placeholder or the public email form instead"
-regex = '''(?i)\b(mkoskinen|mikkokoskinen)\b'''
+regex = '''\b(mkoskinen|mikkokoskinen)\b'''
 tags = ["internal", "handle"]
 
   [rules.allowlist]
