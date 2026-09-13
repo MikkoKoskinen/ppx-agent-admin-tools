@@ -36,9 +36,14 @@ function Resolve-PPXOwnerIdentity {
     .PARAMETER UseDeviceAuthentication
         Forwarded to Connect-AzAccount if a new interactive sign-in is needed.
     .OUTPUTS
-        A case-insensitive dictionary keyed by the ownerId GUID (as passed in) -> { OwnerName,
-        OwnerUPN, OwnerAccountStatus }. OwnerAccountStatus is one of 'Active', 'Disabled',
-        'NotFound', or 'GraphError'. Every id passed in is guaranteed a key in the result.
+        [PSCustomObject] with:
+          - Lookup: a case-insensitive dictionary keyed by the ownerId GUID (as passed in) ->
+            { OwnerName, OwnerUPN, OwnerAccountStatus }. OwnerAccountStatus is one of 'Active',
+            'Disabled', 'NotFound', or 'GraphError'. Every id passed in is guaranteed a key here.
+          - Errors: string array of the same failures already Write-Warning'd during the run (token
+            acquisition, mid-run token refresh, a failed getByIds batch) -- so the entry point can
+            carry them into Export-PPXReport's .limitations.txt sidecar instead of them existing only
+            as console output that scrolls away.
     #>
     [CmdletBinding()]
     param(
@@ -63,7 +68,8 @@ function Resolve-PPXOwnerIdentity {
 
     end {
         $lookup = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::OrdinalIgnoreCase)
-        if ($ids.Count -eq 0) { return $lookup }
+        $errors = [System.Collections.Generic.List[string]]::new()
+        if ($ids.Count -eq 0) { return [PSCustomObject]@{ Lookup = $lookup; Errors = @($errors) } }
 
         # Same delegated-token pattern as Connect-PPXInventoryApi.ps1, but against Graph's resource
         # URL instead of the Power Platform API. Reuses whatever Az context is already active (the
@@ -93,11 +99,13 @@ function Resolve-PPXOwnerIdentity {
             $token = & $acquireGraphToken
         }
         catch {
-            Write-Warning "Could not acquire a Microsoft Graph token ($($_.Exception.Message)) -- owner identities will not be resolved this run. OwnerId (raw GUID) is still populated."
+            $message = "Could not acquire a Microsoft Graph token ($($_.Exception.Message)) -- owner identities will not be resolved this run. OwnerId (raw GUID) is still populated."
+            Write-Warning $message
+            $errors.Add($message)
             foreach ($id in $ids) {
                 $lookup[$id] = [PSCustomObject]@{ OwnerName = ''; OwnerUPN = ''; OwnerAccountStatus = 'GraphError' }
             }
-            return $lookup
+            return [PSCustomObject]@{ Lookup = $lookup; Errors = @($errors) }
         }
 
         $headers = @{
@@ -141,7 +149,9 @@ function Resolve-PPXOwnerIdentity {
                         catch {
                             if (-not $warnedGraphFailure) {
                                 $warnedGraphFailure = $true
-                                Write-Warning "Microsoft Graph token refresh failed mid-run ($($_.Exception.Message)) -- treating unresolved owner id(s) from this and any later failing batch as GraphError."
+                                $message = "Microsoft Graph token refresh failed mid-run ($($_.Exception.Message)) -- treating unresolved owner id(s) from this and any later failing batch as GraphError."
+                                Write-Warning $message
+                                $errors.Add($message)
                             }
                             foreach ($failedId in $chunk) { $null = $failedIds.Add($failedId) }
                             break
@@ -151,7 +161,9 @@ function Resolve-PPXOwnerIdentity {
                     if (-not $warnedGraphFailure) {
                         $warnedGraphFailure = $true
                         $detail = $_.ErrorDetails.Message
-                        Write-Warning "Microsoft Graph getByIds request failed for a batch of $($chunk.Count) owner id(s) ($($_.Exception.Message)). $detail"
+                        $message = "Microsoft Graph getByIds request failed for a batch of $($chunk.Count) owner id(s) ($($_.Exception.Message)). $detail"
+                        Write-Warning $message
+                        $errors.Add($message)
                     }
                     foreach ($failedId in $chunk) { $null = $failedIds.Add($failedId) }
                     break
@@ -193,6 +205,6 @@ function Resolve-PPXOwnerIdentity {
             }
         }
 
-        return $lookup
+        return [PSCustomObject]@{ Lookup = $lookup; Errors = @($errors) }
     }
 }

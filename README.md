@@ -17,8 +17,10 @@ description. This root README is the landing page — status, quick start, and s
 | **[Custom Connector Usage](tools/custom-connector-usage)** | 🧪 Experimental | Tenant-wide view of custom connectors: one row per `(environment × connector)`, covering both connectors in active use and ones merely present in an environment. Read-only. | [Usage](tools/custom-connector-usage/README.md) · [Solution](tools/custom-connector-usage/PPXCustomConnectorUsage.md) |
 | **[Copilot Credit — Tenant Pool Draw](tools/copilot-credit-tenant-pool)** | 🧪 Dev in Progress | Sets the "draw from tenant pool" Copilot Credit enforcement rule on/off, per environment or tenant-wide. Dry-run by default; a target must be chosen explicitly. | [Usage](tools/copilot-credit-tenant-pool/README.md) · [Solution](tools/copilot-credit-tenant-pool/PPXCopilotCreditTenantPool.md) |
 
-Each tool's known data gaps and limitations are also written into its own CSV output as a
-`.limitations.txt` sidecar at run time — not just documented here.
+Each tool's known data gaps and limitations — plus any notable errors encountered during the run
+(e.g. a failed per-environment lookup, or a Microsoft Graph failure during owner resolution) — are
+also written into its own CSV output as a `.limitations.txt` sidecar at run time, not just documented
+here.
 
 ### Agent Governance Baseline
 
