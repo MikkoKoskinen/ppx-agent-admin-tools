@@ -94,6 +94,13 @@ Tenant selection and other knobs come from the shared settings file — see
 [SETTINGS.md](../../SETTINGS.md), including the **Authentication** section for how the token is
 obtained and the alternative app-registration approach.
 
+<img width="1260" height="870" alt="image" src="https://github.com/user-attachments/assets/32daee94-0c94-4263-b3c4-cfcc29c677c4" />
+
+For the Agent Governance Baseline, these settings control things such as the Inventory API page
+size, a maximum number of pages for partial test runs, the report output location, and whether a
+CSV should be exported at all. Any of these can still be overridden with explicit PowerShell
+parameters when needed.
+
 ## Known limitations
 
 - Reflects **published** agent state only; unpublished draft changes are invisible.
