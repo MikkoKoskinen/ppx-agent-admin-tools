@@ -176,7 +176,7 @@ Get-PPXAgentGovernanceBaseline            entry point (tools/agent-governance-ba
  ├─ Resolve-PPXConnectorTier    connector catalog lookup, cached per run       [planned]
  ├─ Resolve-PPXOwnerIdentity    batched Microsoft Graph lookups (getByIds)     [implemented]
  ├─ Get-PPXDlpCoverageFlag      wraps Get-AdminDlpPolicy / connector configs    [planned]
- └─ Export-PPXReport            flat table out (CSV / Excel), + limitations block [planned]
+ └─ Export-PPXReport            flat table out (CSV / Excel), + limitations block [implemented]
 ```
 
 The entry point resolves runtime parameters (tenant, page size, auth mode) from the shared settings
