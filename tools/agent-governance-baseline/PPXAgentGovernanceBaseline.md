@@ -10,6 +10,8 @@ are not built yet, and `EnvironmentGroup` isn't projected by the query, so three
 (`PremiumConnectorCount`, `HasZeroDlpCoverage`, `EnvironmentGroup`) are blank in every row, and a few
 other columns use unverified best-guess field paths — see [Implementation status](#implementation-status).
 
+<img width="2409" height="1247" alt="image" src="https://github.com/user-attachments/assets/bb78b4f2-5e84-44e0-bbb4-33dc1c31afdf" />
+
 ---
 
 ## 1. Purpose
