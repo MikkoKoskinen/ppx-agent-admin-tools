@@ -25,6 +25,12 @@ function Export-PPXReport {
         environmentId, or an environmentId absent from a complete environment lookup), so their
         EnvironmentName/EnvironmentType/IsManagedEnvironment columns are blank. Recorded in
         .limitations.txt alongside -EnvironmentInventory.
+    .PARAMETER RunErrors
+        Optional. String array of notable errors that occurred during this run (currently:
+        Resolve-PPXOwnerIdentity's Microsoft Graph token/getByIds failures) -- already Write-Warning'd
+        to the console, but recorded here too so they survive past the console once it scrolls away,
+        matching the per-item error sections already written by the custom-connector-usage and
+        copilot-credit-tenant-pool tools' Export-PPXReport.
     .PARAMETER Path
         Optional. A folder to auto-name a timestamped CSV into, or a full path ending in .csv.
         Defaults to the repo-root reports\ folder (git-ignored).
@@ -37,8 +43,12 @@ function Export-PPXReport {
 
         [int] $UnmatchedEnvironmentCount,
 
+        [string[]] $RunErrors,
+
         [string] $Path
     )
+
+    if (-not $RunErrors) { $RunErrors = @() }
 
     $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 
@@ -110,6 +120,12 @@ function Export-PPXReport {
     }
     elseif ($UnmatchedEnvironmentCount -gt 0) {
         $limitationsLines += "NOTE: $UnmatchedEnvironmentCount agent record(s) had no matching environment (unpublished/blank environmentId) -- their EnvironmentName/EnvironmentType/IsManagedEnvironment columns are blank."
+        $limitationsLines += ''
+    }
+
+    if ($RunErrors.Count -gt 0) {
+        $limitationsLines += "*** Errors encountered during this run ($($RunErrors.Count)) -- rows affected by these show OwnerAccountStatus = 'GraphError' rather than a resolved owner: ***"
+        $limitationsLines += ($RunErrors | ForEach-Object { "- $_" })
         $limitationsLines += ''
     }
 

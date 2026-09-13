@@ -45,6 +45,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are 
 - A Graph outage now warns once per run instead of once per 1000-id batch.
 - Environment-lookup truncation is now recorded in the `.limitations.txt` sidecar, not just printed
   as a console warning.
+- Agent Governance Baseline: Microsoft Graph errors during owner resolution (token acquisition
+  failure, a mid-run token refresh failure, a failed `getByIds` batch) are now recorded in the
+  `.limitations.txt` sidecar too, not just printed as a console warning. `Resolve-PPXOwnerIdentity`
+  now returns `{ Lookup; Errors }` instead of the lookup dictionary alone.
 - Whitespace-only `ownerId` / `environmentId` values are now treated as blank
   (`[string]::IsNullOrWhiteSpace`), consistent with the resolvers.
 - `Get-PPXSettings.ps1` no longer discards an explicit `$false` setting as "unset" (PowerShell

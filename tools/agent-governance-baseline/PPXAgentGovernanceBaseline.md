@@ -201,7 +201,8 @@ so owner resolution needs no separate sign-in or Microsoft Graph module — it a
 are already consented for the Az PowerShell client are sufficient to read directory objects (true for
 most accounts that can also browse users in Entra). If that assumption doesn't hold in a given tenant,
 every owner lookup for the run falls back to `OwnerAccountStatus = 'GraphError'` with a single
-warning, rather than failing the whole report.
+warning, rather than failing the whole report. That warning (and any other Graph failure during owner
+resolution) is also recorded in the run's `.limitations.txt` sidecar — see §6.5.
 
 The Power Platform API publishes no sample public client, and its resource application ID cannot be
 used as a client ID (doing so yields `AADSTS90009`). The tool therefore borrows the already-consented
@@ -269,8 +270,11 @@ itself (which would conflict with §3's "no post-processing" goal — a plain CS
 so stray non-tabular rows would misalign under the real headers or need manual deletion before
 pivoting), each run writes **two files**: `<name>.csv` (pure tabular data) and a sibling
 `<name>.limitations.txt` sidecar carrying the static §8 limitations plus this run's dynamic notes
-(row count vs. `totalRecords`, `resultTruncated`, which columns are blank-by-design this pass, and any
-automatic warnings about likely-wrong field-path guesses). The same summary is echoed to the console.
+(row count vs. `totalRecords`, `resultTruncated`, which columns are blank-by-design this pass, any
+automatic warnings about likely-wrong field-path guesses, and any Microsoft Graph errors encountered
+while resolving owners — token acquisition failure, a mid-run token refresh failure, or a failed
+`getByIds` batch — so a run affected by a Graph outage doesn't just show unexplained `GraphError` rows
+with no record of why once the console has scrolled away). The same summary is echoed to the console.
 A formatted Excel workbook is not implemented (plain CSV opens directly in Excel with no extra
 dependency).
 
@@ -296,7 +300,7 @@ numeric `0` as "unset" placeholders — `$false` is kept as a real value.
 | Schema assembly (§5) incl. calculated columns | Done for Inventory-sourced/calculated/Graph-sourced columns (40 of 43 columns populated); `EnvironmentGroup`, `PremiumConnectorCount`, `HasZeroDlpCoverage` are blank pending the steps below |
 | `Export-PPXReport` — CSV + `.limitations.txt` sidecar | Done |
 | `Resolve-PPXConnectorTier` | Not started (stub) — feeds `PremiumConnectorCount` |
-| `Resolve-PPXOwnerIdentity` | Done — batched `directoryObjects/getByIds` lookup (up to 1000 ids/request), reuses the delegated Az token pattern against `graph.microsoft.com`; feeds `OwnerName`/`OwnerUPN`/`OwnerAccountStatus`. Entry point joins the result onto each record client-side, same pattern as the environment join |
+| `Resolve-PPXOwnerIdentity` | Done — batched `directoryObjects/getByIds` lookup (up to 1000 ids/request), reuses the delegated Az token pattern against `graph.microsoft.com`; feeds `OwnerName`/`OwnerUPN`/`OwnerAccountStatus`. Entry point joins the result onto each record client-side, same pattern as the environment join. Returns `{ Lookup; Errors }` — `Errors` (Graph token/getByIds failures) is carried into `Export-PPXReport`'s `.limitations.txt` sidecar |
 | `Get-PPXDlpCoverageFlag` | Not started (stub) — feeds `HasZeroDlpCoverage` |
 
 Build order so far: Inventory API connectivity → Inventory-only schema assembly and CSV export →

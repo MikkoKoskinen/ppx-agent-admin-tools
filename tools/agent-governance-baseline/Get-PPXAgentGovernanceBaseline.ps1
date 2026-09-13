@@ -167,7 +167,9 @@ No tenant ID configured. This tool never ships with a tenant baked in — set yo
     $ownerParams = @{}
     if ($TenantId) { $ownerParams['TenantId'] = $TenantId }
     if ($UseDeviceAuthentication) { $ownerParams['UseDeviceAuthentication'] = $true }
-    $ownerLookup = $ownerIds | Resolve-PPXOwnerIdentity @ownerParams
+    $ownerResult = $ownerIds | Resolve-PPXOwnerIdentity @ownerParams
+    $ownerLookup = $ownerResult.Lookup
+    $runErrors = @($ownerResult.Errors)
     Write-Host "Resolved $($ownerLookup.Count) distinct owner identity(ies) via Microsoft Graph."
 
     $managedAgentCount = 0
@@ -211,6 +213,7 @@ No tenant ID configured. This tool never ships with a tenant baked in — set yo
             Inventory                 = $inventory
             EnvironmentInventory      = $environmentResult.Inventory
             UnmatchedEnvironmentCount = $unmatchedCount
+            RunErrors                 = $runErrors
         }
         if ($OutputPath) { $exportParams['Path'] = $OutputPath }
 
