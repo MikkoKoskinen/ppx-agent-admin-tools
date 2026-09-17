@@ -8,11 +8,19 @@ enforcement rule on each environment's `MCSMessages` (Copilot Credits) currency 
 Solution and high-level technical description:
 [PPXCopilotCreditTenantPool.md](PPXCopilotCreditTenantPool.md).
 
-**Status: Experimental.** The read → plan → PATCH pipeline is implemented and wired end-to-end
+**Status: Production tested.** The read → plan → PATCH pipeline is implemented and wired end-to-end
 against `https://api.powerplatform.com/licensing/allocationsByEnvironment` (api-version `2024-10-01`),
-following the same delegated-token + Inventory-API pattern as the other PPX tools. The
-`TenantPoolLockedByPolicy` handling is coded from Microsoft's documented behaviour; confirm the exact
-error surface against a locked environment on first use.
+following the same delegated-token + Inventory-API pattern as the other PPX tools. Verified against a
+live tenant: dry runs across a real 20+ environment tenant (all `Action` outcomes observed, including
+`N/A (no allocation surface)`), and `-CreateAllocationIfMissing` dry run correctly turning one of those
+404 environments into a `WouldCreateAllocation` row. The PATCH endpoint's upsert behaviour (it creates
+an allocation for an environment that has none, rather than 404ing) was independently confirmed
+directly against the live API. `-Apply` itself (writing a `TenantPool` change to an existing
+allocation, and `-Apply` combined with `-CreateAllocationIfMissing`) uses the same, already-verified
+PATCH call but has not yet been run to completion through this cmdlet — do a small `-Apply` on one or
+two environments first before a tenant-wide apply. The `TenantPoolLockedByPolicy` handling is coded
+from Microsoft's documented behaviour but has not yet been exercised against a live policy-locked
+environment either.
 
 ## What it does
 
@@ -38,7 +46,8 @@ written back unchanged.
 - Override a **published environment-group rule** for this setting — the API rejects that
   (`TenantPoolLockedByPolicy`); such environments are reported as `Skipped (locked by policy)`.
 - Anything for environments with no Copilot Credit allocation surface (licensing `GET` → HTTP 404) —
-  reported as `N/A (no allocation surface)`.
+  reported as `N/A (no allocation surface)` — *unless* `-CreateAllocationIfMissing` is given (see
+  below).
 
 ## Prerequisites
 
@@ -87,7 +96,17 @@ Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $false -InputCsv .\re
 
 # just get the rows back, no CSV
 Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $false -AllEnvironments -ExportReport:$false
+
+# also create an allocation (allocated=0, TenantPool=False) for environments that have none today
+# -- as with every other example, -Apply is what actually writes; omit it for a dry run first
+Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $false -AllEnvironments -CreateAllocationIfMissing -Apply
 ```
+
+> **`-Apply` is required for every write, every time.** Every example in this README that changes
+> anything (`-CreateAllocationIfMissing` included) needs `-Apply` explicitly on that same call — there
+> is no "remember my last dry run" or "apply mode" that persists across calls. Leave it off and the
+> call is always read-only: it still produces the full report (`WouldChange` / `WouldCreateAllocation`
+> rows), but nothing is `PATCH`ed.
 
 ### Review-then-apply with `-InputCsv`
 
@@ -142,6 +161,17 @@ the tool creates one with `allocated = 0` (no prepaid capacity reserved) and fla
 `WouldCreateAllocation` / `CreatedAllocation`. Environments left at the default (`True`) with no
 allocation are reported `NoChange` and never written.
 
+**`-CreateAllocationIfMissing`.** Some environments have no allocation surface at all — the licensing
+`GET` itself returns HTTP 404, not just a 200 with an empty `currencyAllocations` array. By default
+these are reported `N/A (no allocation surface)` and never written. Confirmed against the live API:
+`PATCH /licensing/allocationsByEnvironment` **creates** the record for such an environment (HTTP 200)
+rather than 404ing — it has upsert semantics. Pass `-CreateAllocationIfMissing` to have the tool do
+this: it PATCHes a fresh `MCSMessages` allocation (`allocated = 0`, `Alert`/`PayGo`/`Deny` all
+disabled, `TenantPool = -DrawFromTenantCapacity`) for every such environment, reported the same way as
+the existing "no MCSMessages entry" case — `WouldCreateAllocation` / `CreatedAllocation`. Off by
+default: a run should never silently start allocating credits to environments that don't have any
+today.
+
 The function signs in interactively via `Connect-AzAccount` (only when there is no usable Az
 context), writes a CSV to `reports\` at the repo root (git-ignored; override with `-OutputPath` or
 `CopilotCreditTenantPool.OutputPath`) plus a `.limitations.txt` sidecar that doubles as this run's
@@ -178,7 +208,8 @@ One row per target environment.
 - Environments governed by a published environment-group rule for this setting cannot be changed
   here (`TenantPoolLockedByPolicy`) — `Skipped (locked by policy)`.
 - Environments with no Copilot Credit allocation surface (HTTP 404) are never written —
-  `N/A (no allocation surface)`.
+  `N/A (no allocation surface)` — unless `-CreateAllocationIfMissing` is given, which creates a
+  fresh `allocated = 0` allocation for them instead.
 - Up to ~15 minutes of replication latency: a read straight after a write may still show the old
   value. The CSV records the intended post-change value, not a re-read.
 - Point-in-time: another admin, or a later environment-group rule publish, can change it again.
