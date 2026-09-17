@@ -13,6 +13,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). This is the f
 
 ### Added
 
+- **Copilot Credit — Tenant Pool Draw**: new `-DefaultEnvironment` switch on
+`Set-PPXCopilotCreditTenantPoolDraw` — a fourth targeting mode alongside `-EnvironmentId` /
+`-AllEnvironments` / `-InputCsv` that auto-resolves the tenant's Default environment
+(`properties.environmentType -eq 'Default'`) from the Inventory API, so a single command line can
+change (e.g. permanently cap at its own allocation) just that one environment without looking up its
+GUID. Throws if the tenant has no environment flagged `Default`, or more than one.
 - **Copilot Credit — Tenant Pool Draw**: new `-CreateAllocationIfMissing` switch on
 `Set-PPXCopilotCreditTenantPoolDraw`. An environment with no Copilot Credit allocation surface at all
 (licensing `GET` returns HTTP 404) was previously always reported `N/A (no allocation surface)` and

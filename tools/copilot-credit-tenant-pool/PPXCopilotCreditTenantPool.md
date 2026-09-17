@@ -41,7 +41,8 @@ every run produces a before/after CSV audit trail.
 - **Dry run by default** — nothing is written unless `-Apply` is passed; the dry run produces the
   full before/after report so the change can be reviewed first.
 - **Targeting is always explicit** — exactly one of `-EnvironmentId` / `-AllEnvironments` /
-  `-InputCsv`; the tool never changes every environment implicitly.
+  `-DefaultEnvironment` (auto-resolved, no GUID lookup needed) / `-InputCsv`; the tool never changes
+  every environment implicitly.
 - **Review-then-apply** — the dry-run CSV can be trimmed to just the wanted rows and fed straight
   back with `-InputCsv <file> -Apply`; the same report format round-trips.
 - **Minimal, auditable change** — read-modify-write that touches only the `TenantPool` rule and
@@ -56,7 +57,8 @@ every run produces a before/after CSV audit trail.
 ### In scope
 
 - Every environment in the tenant (`-AllEnvironments`), a caller-supplied list (`-EnvironmentId`),
-  or the `EnvironmentId` column of a CSV (`-InputCsv` — typically a trimmed dry-run report), each
+  just the tenant's Default environment (`-DefaultEnvironment`, auto-resolved), or the `EnvironmentId`
+  column of a CSV (`-InputCsv` — typically a trimmed dry-run report), each
   with basic details from the Inventory API (name, type, managed flag, environment group).
 - Reading each environment's current `MCSMessages` allocation and enforcement rules.
 - Setting **only** the `TenantPool` rule to the requested value, creating a zero-credit `MCSMessages`
@@ -199,7 +201,13 @@ body must be complete for that currency. The planner is a pure function (no I/O)
 - **Dry run by default.** Without `-Apply`, steps 1–2 run for every target and the report is
   produced with `WouldChange` / `WouldCreateAllocation` / `NoChange`; no `PATCH` is issued.
 - **Explicit target.** Exactly one of `-EnvironmentId <guid[,guid…]>` / `-AllEnvironments` /
-  `-InputCsv <path>`; the entry point throws if none or more than one is given.
+  `-DefaultEnvironment` / `-InputCsv <path>`; the entry point throws if none or more than one is given.
+- **`-DefaultEnvironment`.** Targets only the tenant's Default environment. Its GUID is resolved
+  automatically from the Inventory API environment list (`properties.environmentType -eq 'Default'`)
+  instead of the caller having to look it up, so a single command line can change (or, run
+  separately from a broader `-AllEnvironments` sweep, deliberately handle) just that one environment
+  -- e.g. permanently capping it at its own allocation while every other environment draws from the
+  tenant pool normally. Throws if the tenant has no environment flagged `Default`, or more than one.
 - **Review-then-apply.** `-InputCsv` takes the target list from a CSV's `EnvironmentId` column —
   normally the dry-run report (`CopilotCreditTenantPool_<timestamp>.csv`) with the unwanted rows
   deleted. An optional `DesiredValue` column (TRUE/FALSE) supplies a per-environment target value
@@ -237,7 +245,7 @@ no comment syntax).
 Runtime knobs come from the shared settings file (`ppx.settings.psd1`, section
 `CopilotCreditTenantPool`, falling back to `Common`): tenant ID (required), environment-list paging
 (`Top` / `MaxPages`), output path, and `ExportReport`. The **change intent** —
-`-DrawFromTenantCapacity`, `-EnvironmentId` / `-AllEnvironments` / `-InputCsv`, `-Apply`, `-Force` —
+`-DrawFromTenantCapacity`, `-EnvironmentId` / `-AllEnvironments` / `-DefaultEnvironment` / `-InputCsv`, `-Apply`, `-Force` —
 is only ever a command-line parameter, never a setting. Precedence is explicit parameter → settings file → default.
 See [SETTINGS.md](../../SETTINGS.md).
 

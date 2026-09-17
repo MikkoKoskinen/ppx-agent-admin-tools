@@ -117,8 +117,9 @@ the first PPX tool that **writes**.
 
 The *change intent* is always passed on the command line, never read from the settings file:
 `-DrawFromTenantCapacity $true|$false` (required), exactly one of `-EnvironmentId <guid[,guid…]>` /
-`-AllEnvironments`, and `-Apply` to actually write (without it the run is a dry run that only reads
-and reports).
+`-AllEnvironments` / `-DefaultEnvironment` (auto-resolves the tenant's Default environment — no GUID
+lookup needed) / `-InputCsv <path>`, and `-Apply` to actually write (without it the run is a dry run
+that only reads and reports).
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
