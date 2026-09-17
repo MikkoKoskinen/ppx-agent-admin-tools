@@ -15,7 +15,7 @@ description. This root README is the landing page — status, quick start, and s
 |---|---|---|---|
 | **[Agent Governance Baseline](tools/agent-governance-baseline)** | 🧪 Production tested | Tenant-wide inventory: one row per published Copilot Studio (V2) agent, 43 governance columns (ownership, environment, auth posture, build origin, connector/channel counts, sharing exposure, staleness). Read-only. | [Usage](tools/agent-governance-baseline/README.md) · [Solution](tools/agent-governance-baseline/PPXAgentGovernanceBaseline.md) |
 | **[Custom Connector Usage](tools/custom-connector-usage)** | 🧪 Experimental | Tenant-wide view of custom connectors: one row per `(environment × connector)`, covering both connectors in active use and ones merely present in an environment. Read-only. | [Usage](tools/custom-connector-usage/README.md) · [Solution](tools/custom-connector-usage/PPXCustomConnectorUsage.md) |
-| **[Copilot Credit — Tenant Pool Draw](tools/copilot-credit-tenant-pool)** | 🧪 Dev in Progress | Sets the "draw from tenant pool" Copilot Credit enforcement rule on/off, per environment or tenant-wide. Dry-run by default; a target must be chosen explicitly. | [Usage](tools/copilot-credit-tenant-pool/README.md) · [Solution](tools/copilot-credit-tenant-pool/PPXCopilotCreditTenantPool.md) |
+| **[Copilot Credit — Tenant Pool Draw](tools/copilot-credit-tenant-pool)** | 🧪 Production tested | Sets the "draw from tenant pool" Copilot Credit enforcement rule on/off, per environment or tenant-wide. Dry-run by default; a target must be chosen explicitly. | [Usage](tools/copilot-credit-tenant-pool/README.md) · [Solution](tools/copilot-credit-tenant-pool/PPXCopilotCreditTenantPool.md) |
 
 Each tool's known data gaps and limitations — plus any notable errors encountered during the run
 (e.g. a failed per-environment lookup, or a Microsoft Graph failure during owner resolution) — are
@@ -49,7 +49,9 @@ enforcement rule on an environment's Copilot Credits allocation, via read-modify
 enforcement rule and the allocated amount are sent back unchanged. It's dry-run by default: without
 `-Apply` it only writes a before/after CSV of what would change. A target is always explicit
 (`-EnvironmentId`, `-AllEnvironments`, or `-InputCsv`, the latter typically a trimmed dry-run report).
-Policy-locked and allocation-less environments are recorded and skipped, not fatal.
+Policy-locked environments are recorded and skipped, not fatal; an environment with no allocation
+surface is likewise skipped by default, or given a fresh `allocated=0` allocation instead when
+`-CreateAllocationIfMissing` is passed.
 
 → [Full usage & setup](tools/copilot-credit-tenant-pool/README.md) · [Solution & technical description](tools/copilot-credit-tenant-pool/PPXCopilotCreditTenantPool.md)
 

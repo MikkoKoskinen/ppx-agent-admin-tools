@@ -11,7 +11,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). This is the f
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Copilot Credit — Tenant Pool Draw**: new `-CreateAllocationIfMissing` switch on
+`Set-PPXCopilotCreditTenantPoolDraw`. An environment with no Copilot Credit allocation surface at all
+(licensing `GET` returns HTTP 404) was previously always reported `N/A (no allocation surface)` and
+skipped. With this switch, such an environment instead gets a fresh `MCSMessages` allocation created
+(`allocated = 0`, `Alert`/`PayGo`/`Deny` disabled, `TenantPool` set to the requested value), reported
+as `WouldCreateAllocation` / `CreatedAllocation` — the same labels already used for the "allocation
+record exists but has no `MCSMessages` entry" case. Confirmed live: `PATCH
+licensing/allocationsByEnvironment` has upsert semantics — it creates the record (HTTP 200) rather
+than 404ing when none exists. Off by default.
+
+### Changed
+
+- **Copilot Credit — Tenant Pool Draw** status promoted from *Dev in Progress* to
+*Production tested*, based on dry runs against a real 20+ environment tenant (all `Action` outcomes
+observed) and the `-CreateAllocationIfMissing` dry-run path and underlying PATCH upsert behaviour both
+confirmed live. `-Apply` itself (via this cmdlet) and the `TenantPoolLockedByPolicy` path remain
+unexercised in production — see the tool's own README status note.
 
 ## [0.1.0] — 2026-09-13
 

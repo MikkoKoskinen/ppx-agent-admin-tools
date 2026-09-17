@@ -22,7 +22,12 @@ function Set-PPXCopilotCreditTenantPoolDraw {
         An environment governed by a published environment-group rule for this setting cannot be
         changed (the API returns TenantPoolLockedByPolicy); it is recorded as
         "Skipped (locked by policy)" and the run continues. An environment with no allocation surface
-        (HTTP 404) is recorded as "N/A (no allocation surface)" and never written.
+        (HTTP 404) is recorded as "N/A (no allocation surface)" and never written -- UNLESS
+        -CreateAllocationIfMissing is given, in which case a new MCSMessages allocation is created for
+        it (allocated=0, Alert/PayGo/Deny disabled, TenantPool=-DrawFromTenantCapacity), reported as
+        WouldCreateAllocation / CreatedAllocation. Confirmed against the live API: PATCHing a
+        currency allocation for an environment that has never had one creates it (HTTP 200, upsert
+        semantics) rather than 404ing.
 
         Runtime values default from the shared settings file (ppx.settings.psd1, section
         'CopilotCreditTenantPool', falling back to 'Common'); an explicit parameter overrides the
@@ -60,6 +65,13 @@ function Set-PPXCopilotCreditTenantPoolDraw {
     .PARAMETER Force
         Also PATCH environments already at the desired value (re-assert it). Default: such
         environments are reported as NoChange and skipped.
+    .PARAMETER CreateAllocationIfMissing
+        For an environment with no Copilot Credit allocation surface (licensing GET returns HTTP 404):
+        instead of reporting "N/A (no allocation surface)" and skipping it, create a new MCSMessages
+        allocation for it -- allocated=0, TenantPool=-DrawFromTenantCapacity, Alert/PayGo/Deny all
+        disabled -- via the same PATCH endpoint (confirmed to upsert: it creates the record rather than
+        404ing). Reported as WouldCreateAllocation (dry run) / CreatedAllocation (-Apply). Default:
+        $false, so a run never silently starts allocating credits to environments that have none today.
     .PARAMETER TenantId
         Entra tenant ID. Required -- here, or Common.TenantId / CopilotCreditTenantPool.TenantId in
         ppx.settings.psd1. No tenant is ever baked into the repo.
@@ -98,6 +110,13 @@ function Set-PPXCopilotCreditTenantPoolDraw {
     .EXAMPLE
         Set-PPXCopilotCreditTenantPoolDraw -InputCsv .\targets.csv -Apply
         Per-environment values taken from each row's DesiredValue column (TRUE / FALSE).
+    .EXAMPLE
+        Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $false -AllEnvironments -CreateAllocationIfMissing
+        DRY RUN including environments with no allocation surface today: those rows show
+        WouldCreateAllocation instead of N/A (no allocation surface). Nothing is written yet -- as
+        with every other example above, -Apply is a separate, required switch for this (or any) call
+        to actually write anything; add it to make the change real:
+        Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $false -AllEnvironments -CreateAllocationIfMissing -Apply
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
     param(
@@ -112,6 +131,8 @@ function Set-PPXCopilotCreditTenantPoolDraw {
         [switch] $Apply,
 
         [switch] $Force,
+
+        [switch] $CreateAllocationIfMissing,
 
         [string] $TenantId,
 
@@ -297,10 +318,10 @@ No tenant ID configured. This tool never ships with a tenant baked in -- set you
             continue
         }
 
-        if ($null -eq $current) {
+        if ($null -eq $current -and -not $CreateAllocationIfMissing) {
             $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $null `
                         -Action 'N/A (no allocation surface)' `
-                        -Detail 'Licensing GET returned HTTP 404 -- no Copilot Credit allocation surface for this environment.' `
+                        -Detail 'Licensing GET returned HTTP 404 -- no Copilot Credit allocation surface for this environment. Pass -CreateAllocationIfMissing to create one.' `
                         -Mode $mode -DesiredValue $rowDesired))
             continue
         }
