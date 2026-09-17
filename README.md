@@ -48,7 +48,8 @@ The first PPX tool that **writes**. `Set-PPXCopilotCreditTenantPoolDraw` flips t
 enforcement rule on an environment's Copilot Credits allocation, via read-modify-write — every other
 enforcement rule and the allocated amount are sent back unchanged. It's dry-run by default: without
 `-Apply` it only writes a before/after CSV of what would change. A target is always explicit
-(`-EnvironmentId`, `-AllEnvironments`, or `-InputCsv`, the latter typically a trimmed dry-run report).
+(`-EnvironmentId`, `-AllEnvironments`, `-DefaultEnvironment` -- auto-resolves the tenant's Default
+environment, no GUID lookup needed -- or `-InputCsv`, the latter typically a trimmed dry-run report).
 Policy-locked environments are recorded and skipped, not fatal; an environment with no allocation
 surface is likewise skipped by default, or given a fresh `allocated=0` allocation instead when
 `-CreateAllocationIfMissing` is passed.

@@ -32,7 +32,7 @@ function Set-PPXCopilotCreditTenantPoolDraw {
         Runtime values default from the shared settings file (ppx.settings.psd1, section
         'CopilotCreditTenantPool', falling back to 'Common'); an explicit parameter overrides the
         file. The change intent -- -DrawFromTenantCapacity, -EnvironmentId / -AllEnvironments /
-        -InputCsv, -Apply -- is never taken from the settings file.
+        -DefaultEnvironment / -InputCsv, -Apply -- is never taken from the settings file.
 
         Review-then-apply workflow: run once as a dry run (e.g. -AllEnvironments) to get the
         CopilotCreditTenantPool_<timestamp>.csv, delete every row you do NOT want changed (in Excel
@@ -48,16 +48,24 @@ function Set-PPXCopilotCreditTenantPoolDraw {
         both are supplied, this parameter wins and is applied to every listed environment.
     .PARAMETER EnvironmentId
         One or more environment GUIDs to change. Exactly one of -EnvironmentId / -AllEnvironments /
-        -InputCsv must be given -- this tool never changes every environment implicitly.
+        -DefaultEnvironment / -InputCsv must be given -- this tool never changes every environment
+        implicitly.
     .PARAMETER AllEnvironments
         Target every environment in the tenant (from the Inventory API environment list).
+    .PARAMETER DefaultEnvironment
+        Target only the tenant's Default environment -- resolved automatically from the Inventory API
+        environment list (properties.environmentType -eq 'Default'), so you don't need to look up or
+        pass its GUID. A single-call way to change (or exclude from a broader sweep by process, e.g.
+        run this separately) just the Default environment's tenant-pool draw setting, e.g. to
+        permanently cap it at its own allocation while managing every other environment normally.
+        Throws if the tenant has no environment flagged Default, or (unexpectedly) more than one.
     .PARAMETER InputCsv
         Path to a CSV whose 'EnvironmentId' column lists the environments to target -- typically a
         dry-run report (CopilotCreditTenantPool_<timestamp>.csv) trimmed to just the rows you want
         applied. Any other columns are ignored except an optional 'DesiredValue' column (TRUE /
         FALSE), which is used as the per-environment target value when -DrawFromTenantCapacity is
         omitted. Blank EnvironmentId rows are skipped; duplicates are de-duplicated (first wins).
-        Mutually exclusive with -EnvironmentId / -AllEnvironments.
+        Mutually exclusive with -EnvironmentId / -AllEnvironments / -DefaultEnvironment.
     .PARAMETER Apply
         Actually write the change. Without it the run is a DRY RUN: every environment is read and the
         report is produced with WouldChange / WouldCreateAllocation / NoChange actions, but nothing
@@ -98,6 +106,10 @@ function Set-PPXCopilotCreditTenantPoolDraw {
         Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $false -AllEnvironments -Apply
         Turns OFF "Draw from the available capacity in my tenant" for every environment in the tenant.
     .EXAMPLE
+        Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $false -DefaultEnvironment -Apply
+        Single-line call that turns OFF tenant-pool draw for just the tenant's Default environment --
+        its GUID is resolved automatically, nothing else is touched.
+    .EXAMPLE
         Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $true -EnvironmentId 11111111-1111-1111-1111-111111111111,22222222-2222-2222-2222-222222222222 -Apply
         Turns the option back ON for two named environments.
     .EXAMPLE
@@ -125,6 +137,8 @@ function Set-PPXCopilotCreditTenantPoolDraw {
         [string[]] $EnvironmentId,
 
         [switch] $AllEnvironments,
+
+        [switch] $DefaultEnvironment,
 
         [string] $InputCsv,
 
@@ -170,10 +184,11 @@ function Set-PPXCopilotCreditTenantPoolDraw {
     $targetModes = @()
     if ($AllEnvironments)          { $targetModes += '-AllEnvironments' }
     if ($EnvironmentId)            { $targetModes += '-EnvironmentId' }
+    if ($DefaultEnvironment)       { $targetModes += '-DefaultEnvironment' }
     if ($PSBoundParameters.ContainsKey('InputCsv') -and $InputCsv) { $targetModes += '-InputCsv' }
 
     if ($targetModes.Count -gt 1) {
-        throw "Specify exactly one of -EnvironmentId, -AllEnvironments, or -InputCsv (got: $($targetModes -join ', '))."
+        throw "Specify exactly one of -EnvironmentId, -AllEnvironments, -DefaultEnvironment, or -InputCsv (got: $($targetModes -join ', '))."
     }
     if ($targetModes.Count -eq 0) {
         throw @'
@@ -181,6 +196,7 @@ No target environments. This tool never changes every environment implicitly -- 
 
   -EnvironmentId <guid>[,<guid>...]   change only the listed environment(s)
   -AllEnvironments                    change every environment in the tenant
+  -DefaultEnvironment                 change only the tenant's Default environment (auto-resolved)
   -InputCsv <path>                    change only the environments listed in a CSV
                                       (e.g. a dry-run report trimmed to the rows you want)
 
@@ -255,6 +271,21 @@ No tenant ID configured. This tool never ships with a tenant baked in -- set you
         if ($envInventory.resultTruncated) {
             Write-Warning 'Environment list is INCOMPLETE (Inventory paging truncated). Some environments will be missed. Re-run without -MaxPages.'
         }
+    }
+    elseif ($DefaultEnvironment) {
+        $defaultIds = @($detailById.Keys | Where-Object {
+                (Get-PPXNestedValue $detailById[$_] 'properties.environmentType' -Default '') -eq 'Default'
+            })
+        if ($defaultIds.Count -eq 0) {
+            throw 'No environment in this tenant is flagged as the Default environment (properties.environmentType -eq ''Default'') -- nothing to target.'
+        }
+        if ($defaultIds.Count -gt 1) {
+            throw "Expected exactly one Default environment but found $($defaultIds.Count): $($defaultIds -join ', '). Use -EnvironmentId to target one explicitly."
+        }
+        $targets = @($defaultIds)
+        $targetsSource = '-DefaultEnvironment (auto-resolved)'
+        $defName = [string] (Get-PPXNestedValue $detailById[$defaultIds[0]] 'properties.displayName' -Default $defaultIds[0])
+        Write-Host "  Default environment resolved: '$defName' ($($defaultIds[0]))."
     }
     elseif ($targetModes -contains '-InputCsv') {
         if (-not (Test-Path -LiteralPath $InputCsv)) { throw "Input CSV not found: $InputCsv" }

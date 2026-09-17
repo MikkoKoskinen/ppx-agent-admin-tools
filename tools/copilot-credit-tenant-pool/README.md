@@ -85,6 +85,9 @@ Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $false -AllEnvironmen
 # APPLY to selected environments only
 Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $true -EnvironmentId 1111...,2222... -Apply
 
+# APPLY to just the tenant's Default environment -- GUID resolved automatically, nothing else touched
+Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $false -DefaultEnvironment -Apply
+
 # per-environment confirmation prompts while applying
 Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $false -AllEnvironments -Apply -Confirm
 
@@ -144,10 +147,18 @@ non-US list-separator locale — so editing the report in Excel and saving it ba
 > Notepad++) — just delete the unwanted lines — or, in Excel, opening it with **Data → From
 > Text/CSV** and saving with **Save As → CSV UTF-8**.
 
-**Targeting is explicit.** Exactly one of `-EnvironmentId <guid[,guid…]>`, `-AllEnvironments`, or
-`-InputCsv <path>` must be given — the tool never changes every environment implicitly.
-`-AllEnvironments` takes its target list from the Inventory API environment list (`-Top` /
+**Targeting is explicit.** Exactly one of `-EnvironmentId <guid[,guid…]>`, `-AllEnvironments`,
+`-DefaultEnvironment`, or `-InputCsv <path>` must be given — the tool never changes every environment
+implicitly. `-AllEnvironments` takes its target list from the Inventory API environment list (`-Top` /
 `-MaxPages` tune that paging; a truncated list is flagged **INCOMPLETE**).
+
+**`-DefaultEnvironment`.** Targets only the tenant's Default environment — its GUID is resolved
+automatically from the Inventory API environment list (`properties.environmentType -eq 'Default'`),
+so a single command line changes just that one environment without having to look up or paste its
+GUID. A common use: permanently cap the Default environment at its own allocation
+(`-DrawFromTenantCapacity $false -DefaultEnvironment -Apply`) while every other environment draws from
+the tenant pool normally. Throws if the tenant has no environment flagged `Default`, or (unexpectedly)
+more than one — use `-EnvironmentId` to target one explicitly in that case.
 
 **Dry run vs apply.** Without `-Apply` the run is read-only: every target environment is `GET` and
 the report shows `WouldChange` / `WouldCreateAllocation` / `NoChange`, but nothing is `PATCH`ed. Add
