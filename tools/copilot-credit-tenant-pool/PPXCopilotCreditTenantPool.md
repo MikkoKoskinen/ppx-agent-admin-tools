@@ -4,11 +4,15 @@ Solution and high-level technical description for the **Copilot Credit — Tenan
 how to run it, see [README.md](README.md) in this folder; for settings and authentication,
 [SETTINGS.md](../../SETTINGS.md); for the technical change history, [CHANGELOG.md](../../CHANGELOG.md).
 
-**Status:** experimental. The read → plan → PATCH pipeline is implemented and wired end-to-end
+**Status:** Production tested. The read → plan → PATCH pipeline is implemented and wired end-to-end
 against `https://api.powerplatform.com/licensing/allocationsByEnvironment` (api-version `2024-10-01`),
 using the same delegated-token + Inventory-API pattern as the other two PPX tools. This is the first
-PPX tool that **writes**. The `TenantPoolLockedByPolicy` classification is coded from Microsoft's
-documented behaviour and should be confirmed against a genuinely locked environment on first use.
+PPX tool that **writes**. Verified against a live tenant: dry runs across a real 20+ environment
+tenant (all `Action` outcomes observed) and the `-CreateAllocationIfMissing` path and underlying PATCH
+upsert behaviour both confirmed live — see the tool's own [README.md](README.md) status note for the
+full verification detail and what remains unexercised (`-Apply` to completion through this cmdlet, a
+genuinely `TenantPoolLockedByPolicy`-locked environment, and the concurrent `-ThrottleLimit`
+processing against a live tenant).
 
 ---
 
@@ -129,7 +133,8 @@ Set-PPXCopilotCreditTenantPoolDraw            entry point (tools/copilot-credit-
  ├─ Import-PPXTargetCsv                only with -InputCsv — read EnvironmentId (+ optional DesiredValue)
  ├─ Connect-PPXInventoryApi            POST resourcequery — every environment + basic details
  │                                     (target set for -AllEnvironments; display names for the report)
- │  for each target environment:
+ │  for each target environment (up to -ThrottleLimit concurrently, default 5 -- ForEach-Object
+ │  -Parallel; the licensing API has no bulk endpoint, so this is the actual speedup lever):
  ├─ Get-PPXEnvironmentCreditAllocation GET  licensing/allocationsByEnvironment/{id}  (HTTP 404 → $null)
  ├─ Resolve-PPXTenantPoolChange        pure planner — minimal read-modify-write PATCH body, or NoChange
  ├─ Set-PPXEnvironmentCreditAllocation PATCH licensing/allocationsByEnvironment   (only when -Apply and
@@ -219,7 +224,24 @@ body must be complete for that currency. The planner is a pure function (no I/O)
 - **`SupportsShouldProcess`.** `-WhatIf` previews; `-Confirm` prompts per environment.
   `ConfirmImpact = 'Medium'`, so `-Apply` alone does not prompt — the dry run is the review gate.
 - **Per-environment isolation.** A read failure, a write failure, a policy lock, or a missing
-  allocation surface is recorded on that environment's row and the sweep continues.
+  allocation surface is recorded on that environment's row and the sweep continues. This holds under
+  concurrency too — each `ForEach-Object -Parallel` branch has its own try/catch, so one
+  environment's failure can't affect another's outcome; 429s are still retried per-call with the
+  existing `Retry-After` backoff in `Set-PPXEnvironmentCreditAllocation` /
+  `Get-PPXEnvironmentCreditAllocation`.
+- **Concurrency (`-ThrottleLimit`, default 5).** The licensing API has no bulk/batch endpoint, so
+  every environment still needs its own `GET`/`PATCH`; running up to `-ThrottleLimit` of them at once
+  (via `ForEach-Object -Parallel`) is what actually speeds up a large `-AllEnvironments` sweep.
+  Trade-off: higher values raise the chance of HTTP 429 responses (time cost, not a correctness
+  risk — already retried with backoff).
+- **`-WhatIf` / `-Confirm` fall back to sequential processing.** `$PSCmdlet.ShouldProcess` throws a
+  cross-thread `MethodInvocationException` if it has to actually write a `What if:` line or show a
+  confirmation prompt from inside a `ForEach-Object -Parallel` runspace — a PowerShell platform
+  limitation, not something a per-environment `ShouldProcess` call can work around. So whenever
+  `-WhatIf` or `-Confirm` is given, the entry point runs the original one-environment-at-a-time loop
+  instead (same behavior as before this change); `-ThrottleLimit` only applies to a plain `-Apply`
+  run. `-Apply` alone never prompts (`ConfirmImpact = 'Medium'` is below the default
+  `ConfirmPreference`), so the common case still runs fully concurrently.
 - **Audit trail.** Every run — dry or applied — writes a before/after CSV and a `.limitations.txt`
   summary (mode, desired value, per-outcome tally, every per-environment error).
 
@@ -244,7 +266,8 @@ no comment syntax).
 
 Runtime knobs come from the shared settings file (`ppx.settings.psd1`, section
 `CopilotCreditTenantPool`, falling back to `Common`): tenant ID (required), environment-list paging
-(`Top` / `MaxPages`), output path, and `ExportReport`. The **change intent** —
+(`Top` / `MaxPages`), per-environment concurrency (`ThrottleLimit`, default 5), output path, and
+`ExportReport`. The **change intent** —
 `-DrawFromTenantCapacity`, `-EnvironmentId` / `-AllEnvironments` / `-DefaultEnvironment` / `-InputCsv`, `-Apply`, `-Force` —
 is only ever a command-line parameter, never a setting. Precedence is explicit parameter → settings file → default.
 See [SETTINGS.md](../../SETTINGS.md).
@@ -261,6 +284,7 @@ See [SETTINGS.md](../../SETTINGS.md).
 | `Resolve-PPXTenantPoolChange` — pure read-modify-write planner | Done; unit-tested against mock allocation shapes |
 | `Set-PPXEnvironmentCreditAllocation` — licensing PATCH + policy-lock detection + 429/401 retry | Done; `TenantPoolLockedByPolicy` surface needs live confirmation |
 | `ConvertTo-PPXTenantPoolRow` / `Export-PPXReport` — CSV + `.limitations.txt` | Done |
+| Concurrent processing (`-ThrottleLimit`, `ForEach-Object -Parallel`) with `-WhatIf`/`-Confirm` sequential fallback | Done; mechanics verified with mocked reads/writes, not yet run against a live tenant |
 | Full-tenant apply run confirmation against a live tenant | Pending |
 
 ## 8. Known limitations
@@ -288,10 +312,19 @@ Stated here and in every report run:
   1000-page hard cap), some environments are not visited.
 - Authentication is interactive delegated only; unattended auth is not supported against this
   endpoint at time of writing.
+- Target environments are processed concurrently (`-ThrottleLimit`, default 5): a 401 token refresh
+  inside one parallel branch does not propagate to others already in flight (each refreshes
+  independently if it hits one), and the per-environment order in the CSV is no longer deterministic
+  (environments complete out of order). If the initial token somehow expires mid-run, multiple
+  branches could each attempt their own interactive `Connect-AzAccount` concurrently -- in practice
+  this is unlikely within one run's lifetime, since the token is acquired fresh at the start, but it
+  is an untested edge case introduced by concurrency.
 
 ## 9. Dependencies
 
-- PowerShell 5.1+ (Windows PowerShell) or 7.x
+- **PowerShell 7.0+** (breaking change from earlier versions of this tool — required for
+  `ForEach-Object -Parallel`, which concurrently processes target environments). Windows PowerShell
+  5.1 is no longer supported.
 - `Az.Accounts` — sign-in and token acquisition
 - Permissions: Power Platform Administrator / Global Administrator (a role that can manage licensing
   and capacity); must have signed into the Power Platform admin center at least once

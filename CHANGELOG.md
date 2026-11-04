@@ -28,8 +28,22 @@ as `WouldCreateAllocation` / `CreatedAllocation` — the same labels already use
 record exists but has no `MCSMessages` entry" case. Confirmed live: `PATCH
 licensing/allocationsByEnvironment` has upsert semantics — it creates the record (HTTP 200) rather
 than 404ing when none exists. Off by default.
+- **Copilot Credit — Tenant Pool Draw**: new `-ThrottleLimit` parameter (default `5`, also settable
+via `CopilotCreditTenantPool.ThrottleLimit`) on `Set-PPXCopilotCreditTenantPoolDraw`. The licensing
+API has no bulk/batch endpoint — every environment still needs its own `GET` and (with `-Apply`)
+`PATCH` — so the per-environment read/plan/apply steps now run concurrently (via
+`ForEach-Object -Parallel`) instead of one at a time, which is what actually speeds up a large
+`-AllEnvironments` run (e.g. 200+ environments). Per-environment error isolation and the dry-run /
+`-Apply` report are unchanged; only the ordering of rows in the CSV is no longer deterministic.
+`-WhatIf` and `-Confirm` always fall back to the original one-environment-at-a-time loop (PowerShell
+cannot show a `What if:` line or confirmation prompt from inside a parallel runspace), so
+`-ThrottleLimit` only has an effect on a plain `-Apply` run.
 
 ### Changed
+
+- **BREAKING**: **Copilot Credit — Tenant Pool Draw** now requires **PowerShell 7.0+**
+(`ForEach-Object -Parallel`, used for the new concurrent processing). Windows PowerShell 5.1 is no
+longer supported by this tool.
 
 - **Copilot Credit — Tenant Pool Draw** status promoted from *Dev in Progress* to
 *Production tested*, based on dry runs against a real 20+ environment tenant (all `Action` outcomes
