@@ -13,6 +13,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). This is the f
 
 ### Added
 
+- **Agent SharePoint Connections** (new tool, first version, experimental): `Get-PPXAgentSharePointConnections`
+lists Copilot Studio agents that use SharePoint as a knowledge source, with the SharePoint URLs, one
+row per source. Agents and environments come from the Inventory API (whole tenant, or only the
+environments given in `-EnvironmentId`); the knowledge sources themselves are read per environment
+from the Dataverse `botcomponents` table because neither the Inventory API nor any Power Platform
+REST API exposes them. Confirmed working on a first live run after fixing a token-callback scoping bug
+(`GetNewClosure()` hid the dot-sourced `Get-PPXAccessToken`).
 - **Copilot Credit — Tenant Pool Draw**: new `-DefaultEnvironment` switch on
 `Set-PPXCopilotCreditTenantPoolDraw` — a fourth targeting mode alongside `-EnvironmentId` /
 `-AllEnvironments` / `-InputCsv` that auto-resolves the tenant's Default environment
