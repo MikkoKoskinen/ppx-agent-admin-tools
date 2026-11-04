@@ -266,8 +266,7 @@ no comment syntax).
 
 Runtime knobs come from the shared settings file (`ppx.settings.psd1`, section
 `CopilotCreditTenantPool`, falling back to `Common`): tenant ID (required), environment-list paging
-(`Top` / `MaxPages`), per-environment concurrency (`ThrottleLimit`, default 5), output path, and
-`ExportReport`. The **change intent** —
+(`Top` / `MaxPages`), output path, and `ExportReport`. The **change intent** —
 `-DrawFromTenantCapacity`, `-EnvironmentId` / `-AllEnvironments` / `-DefaultEnvironment` / `-InputCsv`, `-Apply`, `-Force` —
 is only ever a command-line parameter, never a setting. Precedence is explicit parameter → settings file → default.
 See [SETTINGS.md](../../SETTINGS.md).
