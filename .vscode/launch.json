@@ -29,6 +29,15 @@
             "cwd": "${workspaceFolder}/tools/copilot-credit-tenant-pool"
         },
         {
+            // Read-only. Add "-EnvironmentId", "<guid>" to args to limit to one environment.
+            "name": "PPX: Debug Agent SharePoint Connections",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "${workspaceFolder}/tools/agent-sharepoint-connections/Debug-AgentSharePointConnections.ps1",
+            "args": [ "-Verbose", "-MaxEnvironments", "1" ],
+            "cwd": "${workspaceFolder}/tools/agent-sharepoint-connections"
+        },
+        {
             // Generic fallback: run whatever .ps1 is in the active editor.
             // Only useful for scripts that actually invoke something at top level.
             "name": "PowerShell: Current File",

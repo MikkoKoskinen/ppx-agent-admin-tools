@@ -15,6 +15,7 @@ description. This root README is the landing page — status, quick start, and s
 |---|---|---|---|
 | **[Agent Governance Baseline](tools/agent-governance-baseline)** | 🧪 Production tested | Tenant-wide inventory: one row per published Copilot Studio (V2) agent, 43 governance columns (ownership, environment, auth posture, build origin, connector/channel counts, sharing exposure, staleness). Read-only. | [Usage](tools/agent-governance-baseline/README.md) · [Solution](tools/agent-governance-baseline/PPXAgentGovernanceBaseline.md) |
 | **[Custom Connector Usage](tools/custom-connector-usage)** | 🧪 Experimental | Tenant-wide view of custom connectors: one row per `(environment × connector)`, covering both connectors in active use and ones merely present in an environment. Read-only. | [Usage](tools/custom-connector-usage/README.md) · [Solution](tools/custom-connector-usage/PPXCustomConnectorUsage.md) |
+| **[Agent SharePoint Connections](tools/agent-sharepoint-connections)** | 🧪 Experimental (first version) | Lists each Copilot Studio agent that uses SharePoint as a knowledge source, with the attached SharePoint URLs. Whole tenant or selected environment(s) via `-EnvironmentId`. Read-only. | [Usage](tools/agent-sharepoint-connections/README.md) · [Solution](tools/agent-sharepoint-connections/PPXAgentSharePointConnections.md) |
 | **[Copilot Credit — Tenant Pool Draw](tools/copilot-credit-tenant-pool)** | 🧪 Production tested | Sets the "draw from tenant pool" Copilot Credit enforcement rule on/off, per environment or tenant-wide. Dry-run by default; a target must be chosen explicitly. | [Usage](tools/copilot-credit-tenant-pool/README.md) · [Solution](tools/copilot-credit-tenant-pool/PPXCopilotCreditTenantPool.md) |
 
 Each tool's known data gaps and limitations — plus any notable errors encountered during the run
@@ -55,6 +56,18 @@ surface is likewise skipped by default, or given a fresh `allocated=0` allocatio
 `-CreateAllocationIfMissing` is passed.
 
 → [Full usage & setup](tools/copilot-credit-tenant-pool/README.md) · [Solution & technical description](tools/copilot-credit-tenant-pool/PPXCopilotCreditTenantPool.md)
+
+### Agent SharePoint Connections
+
+`Get-PPXAgentSharePointConnections` answers "which agents use SharePoint as knowledge, and which
+sites/folders?". The Inventory API only exposes knowledge *counts*, and no Power Platform REST API
+returns an agent's knowledge sources, so the tool takes agents and environments from the Inventory API
+and then reads each environment's Dataverse `botcomponents` rows (unofficial, read-only) to extract the
+SharePoint URLs. Inventory the whole tenant, or only selected environments with `-EnvironmentId`.
+Needs read access to `botcomponents` in each scanned environment; unreadable environments are reported
+as error rows, not silently dropped.
+
+→ [Full usage & setup](tools/agent-sharepoint-connections/README.md) · [Solution & technical description](tools/agent-sharepoint-connections/PPXAgentSharePointConnections.md)
 
 ## Quick start
 
@@ -131,6 +144,11 @@ ppx-agent-admin-tools/
    │  ├─ README.md                          Usage instructions.
    │  ├─ PPXCustomConnectorUsage.md         Solution + technical description.
    │  ├─ Get-PPXCustomConnectorUsage.ps1    Entry-point function.
+   │  └─ private/
+   ├─ agent-sharepoint-connections/
+   │  ├─ README.md                          Usage instructions.
+   │  ├─ PPXAgentSharePointConnections.md     Solution + technical description.
+   │  ├─ Get-PPXAgentSharePointConnections.ps1 Entry-point function (read-only).
    │  └─ private/
    └─ copilot-credit-tenant-pool/
       ├─ README.md                          Usage instructions.

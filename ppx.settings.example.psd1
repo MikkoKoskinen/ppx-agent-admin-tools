@@ -105,6 +105,39 @@
     }
 
     # ---------------------------------------------------------------------------
+    # tools/agent-sharepoint-connections
+    #
+    # Which environments to inventory is chosen on the command line, not here:
+    #   -EnvironmentId <guid[,guid...]>   selected environment(s); omit for ALL environments
+    # ---------------------------------------------------------------------------
+    AgentSharePointConnections = @{
+
+        # TenantId = ''   # uncomment to use a different tenant for just this tool
+
+        # Inventory API page size (1-1000). 0 = default (1000). Does not cap the total.
+        Top = 0
+
+        # Safety cap on Inventory API pages per query. 0 = no cap. A capped run is flagged INCOMPLETE.
+        MaxPages = 0
+
+        # Cap on how many environments get the per-environment Dataverse scan. 0 = all.
+        MaxEnvironments = 0
+
+        # botcomponent componenttype value of knowledge sources, once confirmed in your tenant
+        # (a first report's ComponentType column shows it). 0 = no server-side type filter.
+        KnowledgeComponentType = 0
+
+        # $true = also list non-SharePoint knowledge sources (public websites etc.).
+        IncludeAllKnowledge = $false
+
+        # Where the CSV report (and its .limitations.txt sidecar) is written. '' = repo-root reports\.
+        OutputPath = ''
+
+        # $false = only build and return the rows in memory, write nothing to disk.
+        ExportReport = $true
+    }
+
+    # ---------------------------------------------------------------------------
     # tools/copilot-credit-tenant-pool
     #
     # Sets the Copilot Credit "Draw from the available capacity in my tenant" option (the TenantPool

@@ -129,6 +129,28 @@ that only reads and reports).
 | `OutputPath` | string | `''` | Where the CSV report (+ `.limitations.txt` sidecar) is written. A folder path auto-names a timestamped file; a path ending in `.csv` is used as-is. `''` = the repo-root `reports\` folder (git-ignored). |
 | `ExportReport` | bool | `$true` | Whether to write the CSV report to disk. `$false` = only read and shape the rows in memory. |
 
+### `AgentSharePointConnections` — [`tools/agent-sharepoint-connections`](tools/agent-sharepoint-connections)
+
+Lists agents that use SharePoint as a knowledge source. *Which environments to inventory* is passed on
+the command line, not read from the settings file: `-EnvironmentId <guid[,guid…]>` for selected
+environments, or omit it for all environments.
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `TenantId` | string | *(inherits `Common`)* | Override the tenant for just this tool. |
+| `Top` | int | `0` | Rows fetched **per Inventory API request** (1–1000; higher is clamped). `0` = default (1000). Does not cap the total. |
+| `MaxPages` | int | `0` | Safety cap on Inventory API pages **per query**. `0` = no cap. A small value gives a quick partial pull — the report is then flagged **INCOMPLETE**. |
+| `MaxEnvironments` | int | `0` | Cap on how many environments get the per-environment Dataverse scan. `0` = all. |
+| `KnowledgeComponentType` | int | `0` | `botcomponents.componenttype` value of knowledge sources, once confirmed in your tenant (shown in the run summary and the `ComponentType` column). `0` = no server-side type filter. |
+| `IncludeAllKnowledge` | bool | `$false` | `$true` = also list non-SharePoint knowledge sources (public websites, etc.). |
+| `OutputPath` | string | `''` | Where the CSV report (+ `.limitations.txt` sidecar) is written. Folder path auto-names a timestamped file; a `.csv` path is used as-is. `''` = the repo-root `reports\` folder (git-ignored). |
+| `ExportReport` | bool | `$true` | Whether to write the CSV report to disk. `$false` = only build and return the rows in memory. |
+
+This tool also requests a token for each scanned environment's **Dataverse org URL** (and, only as a
+fallback, `https://service.powerapps.com/` for the BAP admin API) in addition to the Power Platform
+API token — see [Authentication](#authentication). The signed-in user needs read access to the
+`botcomponents` table in every environment scanned.
+
 ## Authentication
 
 The tools call the **Power Platform API** (`https://api.powerplatform.com`) with an interactive
