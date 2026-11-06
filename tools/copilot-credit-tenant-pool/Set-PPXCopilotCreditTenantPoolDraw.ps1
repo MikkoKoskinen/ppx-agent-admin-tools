@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 function Set-PPXCopilotCreditTenantPoolDraw {
     <#
     .SYNOPSIS
@@ -90,6 +92,15 @@ function Set-PPXCopilotCreditTenantPoolDraw {
         Cap on Inventory API pages for the environment list. 0 (default) = retrieve everything. A
         small value gives a quick partial pull while testing; the environment list is then flagged
         INCOMPLETE.
+    .PARAMETER ThrottleLimit
+        How many target environments are read/planned/PATCHed concurrently. Default 5. The licensing
+        API has no bulk endpoint -- every environment still needs its own GET and (with -Apply) PATCH
+        call, so this is what actually speeds up a large -AllEnvironments run. Higher values finish
+        faster but raise the chance of HTTP 429 throttling from the licensing API (already retried
+        with backoff, so a 429 costs time, not correctness). Requires PowerShell 7+
+        (ForEach-Object -Parallel). Ignored when -WhatIf or -Confirm is given -- those always run
+        sequentially, one environment at a time, because $PSCmdlet.ShouldProcess cannot write a
+        "What if:" line or show a confirmation prompt from inside a parallel runspace.
     .PARAMETER UseDeviceAuthentication
         Device-code sign-in instead of the interactive browser prompt (needed under the VS Code
         debugger).
@@ -154,6 +165,8 @@ function Set-PPXCopilotCreditTenantPoolDraw {
 
         [int] $MaxPages,
 
+        [int] $ThrottleLimit,
+
         [switch] $UseDeviceAuthentication,
 
         [string] $OutputPath,
@@ -166,11 +179,25 @@ function Set-PPXCopilotCreditTenantPoolDraw {
     $privatePath = Join-Path $PSScriptRoot 'private'
     Get-ChildItem -Path $privatePath -Filter '*.ps1' | ForEach-Object { . $_.FullName }
 
+    # Captured as source TEXT (not ScriptBlock objects -- ForEach-Object -Parallel's $using: scope
+    # explicitly rejects passed-in scriptblock variables) so each parallel runspace below can
+    # reconstruct these functions locally via [scriptblock]::Create(...) without re-dot-sourcing the
+    # .ps1 files concurrently, which races on PowerShell's internal script-parse cache and can throw
+    # spurious "same key already added" errors under load.
+    $fnGetAllocationSrc = (${function:Get-PPXEnvironmentCreditAllocation}).ToString()
+    $fnResolveChangeSrc = (${function:Resolve-PPXTenantPoolChange}).ToString()
+    $fnSetAllocationSrc = (${function:Set-PPXEnvironmentCreditAllocation}).ToString()
+    $fnConvertRowSrc    = (${function:ConvertTo-PPXTenantPoolRow}).ToString()
+    $fnNestedValueSrc   = (${function:Get-PPXNestedValue}).ToString()
+    $fnTokenSrc         = (${function:Get-PPXPowerPlatformToken}).ToString()
+
     # Fall back to the shared settings file for any parameter not passed explicitly.
     $settings = Get-PPXSettings -Section 'CopilotCreditTenantPool'
     if (-not $PSBoundParameters.ContainsKey('TenantId') -and $settings.TenantId) { $TenantId = $settings.TenantId }
     if (-not $PSBoundParameters.ContainsKey('Top') -and $settings.Top) { $Top = $settings.Top }
     if (-not $PSBoundParameters.ContainsKey('MaxPages') -and $settings.MaxPages) { $MaxPages = $settings.MaxPages }
+    if (-not $PSBoundParameters.ContainsKey('ThrottleLimit') -and $settings.ThrottleLimit) { $ThrottleLimit = $settings.ThrottleLimit }
+    if (-not $ThrottleLimit -or $ThrottleLimit -lt 1) { $ThrottleLimit = 5 }
     if (-not $PSBoundParameters.ContainsKey('UseDeviceAuthentication') -and $settings.UseDeviceAuthentication) {
         $UseDeviceAuthentication = [bool] $settings.UseDeviceAuthentication
     }
@@ -328,86 +355,213 @@ No tenant ID configured. This tool never ships with a tenant baked in -- set you
     }
 
     # --- per-environment: read -> plan -> (apply) ---------------------------------------------
-    $rows   = [System.Collections.Generic.List[object]]::new()
-    $errors = @{}
-    $i = 0
-    foreach ($envId in $targets) {
-        $i++
-        $detail  = if ($detailById.ContainsKey($envId)) { $detailById[$envId] } else { $null }
-        $envName = [string] (Get-PPXNestedValue $detail 'properties.displayName' -Default $envId)
-        $rowDesired = if ($desiredBound) { [bool] $DrawFromTenantCapacity } else { [bool] $perRowDesired[$envId] }
-        Write-Progress -Activity "Copilot Credit tenant-pool draw ($mode)" -Status "$i / $($targets.Count) : $envName" -PercentComplete (($i / [Math]::Max($targets.Count, 1)) * 100)
+    # Every environment's GET/plan/PATCH is independent, so by default they run concurrently
+    # (-ThrottleLimit, default 5) instead of one at a time -- the licensing API has no bulk
+    # endpoint, so this client-side concurrency is what actually speeds up a large
+    # -AllEnvironments run. EXCEPTION: $PSCmdlet.ShouldProcess throws a cross-thread
+    # MethodInvocationException ("WriteObject ... cannot be called from outside ...") when it needs
+    # to actually write a "What if:" line or show a confirmation prompt from inside a
+    # ForEach-Object -Parallel runspace -- a documented PowerShell limitation, not something this
+    # tool can work around while still using ShouldProcess per environment. So -WhatIf and -Confirm
+    # fall back to the original fully sequential loop, where per-item ShouldProcess has always
+    # worked; both are about careful, reviewed control rather than throughput, so losing
+    # concurrency there is the right trade.
+    $needsSequential = $WhatIfPreference -or $PSBoundParameters.ContainsKey('Confirm')
 
-        try {
-            $current = Get-PPXEnvironmentCreditAllocation -EnvironmentId $envId -AccessToken $token -TokenFactory $tokenFactory
-        }
-        catch {
-            $errors[$envId] = $_.Exception.Message
-            $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $null `
-                        -Action 'Error (read)' -Detail $_.Exception.Message -Mode $mode -DesiredValue $rowDesired))
-            Write-Warning "  $envName : read failed -- $($_.Exception.Message)"
-            continue
-        }
+    Write-Host "..$($targets.Count) target environment(s); $mode $(if ($needsSequential) { '(sequential -- -WhatIf/-Confirm)' } else { "(ThrottleLimit=$ThrottleLimit)" })."
 
-        if ($null -eq $current -and -not $CreateAllocationIfMissing) {
-            $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $null `
-                        -Action 'N/A (no allocation surface)' `
-                        -Detail 'Licensing GET returned HTTP 404 -- no Copilot Credit allocation surface for this environment. Pass -CreateAllocationIfMissing to create one.' `
-                        -Mode $mode -DesiredValue $rowDesired))
-            continue
-        }
+    if ($needsSequential) {
+        $rows   = [System.Collections.Generic.List[object]]::new()
+        $errors = @{}
+        $i = 0
+        foreach ($envId in $targets) {
+            $i++
+            $detail  = if ($detailById.ContainsKey($envId)) { $detailById[$envId] } else { $null }
+            $envName = [string] (Get-PPXNestedValue $detail 'properties.displayName' -Default $envId)
+            $rowDesired = if ($desiredBound) { [bool] $DrawFromTenantCapacity } else { [bool] $perRowDesired[$envId] }
+            Write-Progress -Activity "Copilot Credit tenant-pool draw ($mode)" -Status "$i / $($targets.Count) : $envName" -PercentComplete (($i / [Math]::Max($targets.Count, 1)) * 100)
 
-        $plan = Resolve-PPXTenantPoolChange -CurrentAllocation $current -EnvironmentId $envId -DesiredValue $rowDesired -Force:$Force
-
-        if ($plan.Action -eq 'NoChange') {
-            $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $plan `
-                        -Action 'NoChange' -Detail 'Already at the desired value.' -Mode $mode -DesiredValue $rowDesired))
-            continue
-        }
-
-        if (-not $Apply) {
-            $would = if ($plan.Action -eq 'Create') { 'WouldCreateAllocation' } else { 'WouldChange' }
-            $note  = if ($plan.Action -eq 'Create') {
-                "No MCSMessages allocation exists; -Apply would create one with allocated=0 and TenantPool=$rowDesired."
-            } else { '' }
-            $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $plan `
-                        -Action $would -Detail $note -Mode $mode -DesiredValue $rowDesired))
-            continue
-        }
-
-        $target = "environment '$envName' ($envId): 'Draw from tenant capacity' $($plan.BeforeValue) -> $rowDesired (allocated + Alert/PayGo/Deny unchanged)"
-        if (-not $PSCmdlet.ShouldProcess($target, 'PATCH licensing/allocationsByEnvironment')) {
-            $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $plan `
-                        -Action 'Skipped (declined)' -Detail '-WhatIf / declined at the confirmation prompt.' `
-                        -Mode $mode -DesiredValue $rowDesired))
-            continue
-        }
-
-        try {
-            $null = Set-PPXEnvironmentCreditAllocation -Body $plan.PatchBody -AccessToken $token -TokenFactory $tokenFactory
-            $done = if ($plan.Action -eq 'Create') { 'CreatedAllocation' } else { 'Changed' }
-            $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $plan `
-                        -Action $done -Detail '' -Mode $mode -DesiredValue $rowDesired))
-            Write-Host "  $envName : $done -- TenantPool=$rowDesired"
-        }
-        catch {
-            $msg = $_.Exception.Message
-            if ($msg -like 'LOCKED_BY_POLICY:*') {
-                $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $plan `
-                            -Action 'Skipped (locked by policy)' -Detail $msg -Mode $mode -DesiredValue $rowDesired))
-                Write-Warning "  $envName : locked by an environment-group policy -- skipped."
+            try {
+                $current = Get-PPXEnvironmentCreditAllocation -EnvironmentId $envId -AccessToken $token -TokenFactory $tokenFactory
             }
-            else {
-                $errors[$envId] = $msg
+            catch {
+                $errors[$envId] = $_.Exception.Message
+                $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $null `
+                            -Action 'Error (read)' -Detail $_.Exception.Message -Mode $mode -DesiredValue $rowDesired))
+                Write-Warning "  $envName : read failed -- $($_.Exception.Message)"
+                continue
+            }
+
+            if ($null -eq $current -and -not $CreateAllocationIfMissing) {
+                $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $null `
+                            -Action 'N/A (no allocation surface)' `
+                            -Detail 'Licensing GET returned HTTP 404 -- no Copilot Credit allocation surface for this environment. Pass -CreateAllocationIfMissing to create one.' `
+                            -Mode $mode -DesiredValue $rowDesired))
+                continue
+            }
+
+            $plan = Resolve-PPXTenantPoolChange -CurrentAllocation $current -EnvironmentId $envId -DesiredValue $rowDesired -Force:$Force
+
+            if ($plan.Action -eq 'NoChange') {
                 $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $plan `
-                            -Action 'Error (write)' -Detail $msg -Mode $mode -DesiredValue $rowDesired))
-                Write-Warning "  $envName : write failed -- $msg"
+                            -Action 'NoChange' -Detail 'Already at the desired value.' -Mode $mode -DesiredValue $rowDesired))
+                continue
+            }
+
+            if (-not $Apply) {
+                $would = if ($plan.Action -eq 'Create') { 'WouldCreateAllocation' } else { 'WouldChange' }
+                $note  = if ($plan.Action -eq 'Create') {
+                    "No MCSMessages allocation exists; -Apply would create one with allocated=0 and TenantPool=$rowDesired."
+                } else { '' }
+                $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $plan `
+                            -Action $would -Detail $note -Mode $mode -DesiredValue $rowDesired))
+                continue
+            }
+
+            $target = "environment '$envName' ($envId): 'Draw from tenant capacity' $($plan.BeforeValue) -> $rowDesired (allocated + Alert/PayGo/Deny unchanged)"
+            if (-not $PSCmdlet.ShouldProcess($target, 'PATCH licensing/allocationsByEnvironment')) {
+                $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $plan `
+                            -Action 'Skipped (declined)' -Detail '-WhatIf / declined at the confirmation prompt.' `
+                            -Mode $mode -DesiredValue $rowDesired))
+                continue
+            }
+
+            try {
+                $null = Set-PPXEnvironmentCreditAllocation -Body $plan.PatchBody -AccessToken $token -TokenFactory $tokenFactory
+                $done = if ($plan.Action -eq 'Create') { 'CreatedAllocation' } else { 'Changed' }
+                $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $plan `
+                            -Action $done -Detail '' -Mode $mode -DesiredValue $rowDesired))
+                Write-Host "  $envName : $done -- TenantPool=$rowDesired"
+            }
+            catch {
+                $msg = $_.Exception.Message
+                if ($msg -like 'LOCKED_BY_POLICY:*') {
+                    $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $plan `
+                                -Action 'Skipped (locked by policy)' -Detail $msg -Mode $mode -DesiredValue $rowDesired))
+                    Write-Warning "  $envName : locked by an environment-group policy -- skipped."
+                }
+                else {
+                    $errors[$envId] = $msg
+                    $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $plan `
+                                -Action 'Error (write)' -Detail $msg -Mode $mode -DesiredValue $rowDesired))
+                    Write-Warning "  $envName : write failed -- $msg"
+                }
             }
         }
+        Write-Progress -Activity "Copilot Credit tenant-pool draw ($mode)" -Completed
+        $rowArray = $rows.ToArray()
     }
-    Write-Progress -Activity "Copilot Credit tenant-pool draw ($mode)" -Completed
+    else {
+        # Rows/errors are collected into thread-safe collections since multiple runspaces write to
+        # them at once. Neither -WhatIf nor -Confirm reaches this branch (see $needsSequential
+        # above), so there is nothing for ShouldProcess to gate here -- -Apply alone never prompts
+        # (ConfirmImpact = 'Medium' < the default ConfirmPreference), so the write proceeds directly.
+        $concurrentRows   = [System.Collections.Concurrent.ConcurrentBag[object]]::new()
+        $concurrentErrors = [System.Collections.Concurrent.ConcurrentDictionary[string, string]]::new()
 
-    $rowArray = $rows.ToArray()
+        $targets | ForEach-Object -ThrottleLimit $ThrottleLimit -Parallel {
+            $envId = $_
+
+            # Each parallel runspace starts clean -- reconstruct this tool's private functions from
+            # source text captured in the parent scope (see the $fn*Src variables above;
+            # re-dot-sourcing the .ps1 files here instead would race on PowerShell's internal
+            # script-parse cache and intermittently throw "same key already added" errors).
+            ${function:Get-PPXEnvironmentCreditAllocation} = [scriptblock]::Create($using:fnGetAllocationSrc)
+            ${function:Resolve-PPXTenantPoolChange}         = [scriptblock]::Create($using:fnResolveChangeSrc)
+            ${function:Set-PPXEnvironmentCreditAllocation}  = [scriptblock]::Create($using:fnSetAllocationSrc)
+            ${function:ConvertTo-PPXTenantPoolRow}          = [scriptblock]::Create($using:fnConvertRowSrc)
+            ${function:Get-PPXNestedValue}                  = [scriptblock]::Create($using:fnNestedValueSrc)
+            ${function:Get-PPXPowerPlatformToken}           = [scriptblock]::Create($using:fnTokenSrc)
+
+            $detailById   = $using:detailById
+            $mode         = $using:mode
+            $Apply        = $using:Apply
+            $Force        = $using:Force
+            $CreateAllocationIfMissing = $using:CreateAllocationIfMissing
+            $desiredBound = $using:desiredBound
+            $DrawFromTenantCapacity    = $using:DrawFromTenantCapacity
+            $perRowDesired = $using:perRowDesired
+            $token         = $using:token
+            $TenantId      = $using:TenantId
+            $UseDeviceAuthentication  = $using:UseDeviceAuthentication
+            $rows   = $using:concurrentRows
+            $errors = $using:concurrentErrors
+
+            # Rebuilt per-branch: the outer $tokenFactory closure resolves $TenantId /
+            # $UseDeviceAuthentication by dynamic scope, which does not cross into a parallel
+            # runspace.
+            $tokenFactory = { Get-PPXPowerPlatformToken -TenantId $TenantId -UseDeviceAuthentication:$UseDeviceAuthentication }
+
+            $detail  = if ($detailById.ContainsKey($envId)) { $detailById[$envId] } else { $null }
+            $envName = [string] (Get-PPXNestedValue $detail 'properties.displayName' -Default $envId)
+            $rowDesired = if ($desiredBound) { [bool] $DrawFromTenantCapacity } else { [bool] $perRowDesired[$envId] }
+            Write-Host "  $envName : starting."
+
+            try {
+                $current = Get-PPXEnvironmentCreditAllocation -EnvironmentId $envId -AccessToken $token -TokenFactory $tokenFactory
+            }
+            catch {
+                $errors[$envId] = $_.Exception.Message
+                $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $null `
+                            -Action 'Error (read)' -Detail $_.Exception.Message -Mode $mode -DesiredValue $rowDesired))
+                Write-Warning "  $envName : read failed -- $($_.Exception.Message)"
+                return
+            }
+
+            if ($null -eq $current -and -not $CreateAllocationIfMissing) {
+                $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $null `
+                            -Action 'N/A (no allocation surface)' `
+                            -Detail 'Licensing GET returned HTTP 404 -- no Copilot Credit allocation surface for this environment. Pass -CreateAllocationIfMissing to create one.' `
+                            -Mode $mode -DesiredValue $rowDesired))
+                return
+            }
+
+            $plan = Resolve-PPXTenantPoolChange -CurrentAllocation $current -EnvironmentId $envId -DesiredValue $rowDesired -Force:$Force
+
+            if ($plan.Action -eq 'NoChange') {
+                $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $plan `
+                            -Action 'NoChange' -Detail 'Already at the desired value.' -Mode $mode -DesiredValue $rowDesired))
+                return
+            }
+
+            if (-not $Apply) {
+                $would = if ($plan.Action -eq 'Create') { 'WouldCreateAllocation' } else { 'WouldChange' }
+                $note  = if ($plan.Action -eq 'Create') {
+                    "No MCSMessages allocation exists; -Apply would create one with allocated=0 and TenantPool=$rowDesired."
+                } else { '' }
+                $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $plan `
+                            -Action $would -Detail $note -Mode $mode -DesiredValue $rowDesired))
+                return
+            }
+
+            try {
+                $null = Set-PPXEnvironmentCreditAllocation -Body $plan.PatchBody -AccessToken $token -TokenFactory $tokenFactory
+                $done = if ($plan.Action -eq 'Create') { 'CreatedAllocation' } else { 'Changed' }
+                $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $plan `
+                            -Action $done -Detail '' -Mode $mode -DesiredValue $rowDesired))
+                Write-Host "  $envName : $done -- TenantPool=$rowDesired"
+            }
+            catch {
+                $msg = $_.Exception.Message
+                if ($msg -like 'LOCKED_BY_POLICY:*') {
+                    $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $plan `
+                                -Action 'Skipped (locked by policy)' -Detail $msg -Mode $mode -DesiredValue $rowDesired))
+                    Write-Warning "  $envName : locked by an environment-group policy -- skipped."
+                }
+                else {
+                    $errors[$envId] = $msg
+                    $rows.Add((ConvertTo-PPXTenantPoolRow -EnvironmentId $envId -EnvironmentDetail $detail -Plan $plan `
+                                -Action 'Error (write)' -Detail $msg -Mode $mode -DesiredValue $rowDesired))
+                    Write-Warning "  $envName : write failed -- $msg"
+                }
+            }
+        }
+
+        $rowArray = @($concurrentRows)
+        $errors   = @{}
+        foreach ($key in $concurrentErrors.Keys) { $errors[$key] = $concurrentErrors[$key] }
+    }
+
     $summary  = $rowArray | Group-Object Action | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Count)" }
     Write-Host ("Done. {0} row(s): {1}" -f $rowArray.Count, ($summary -join ', '))
 

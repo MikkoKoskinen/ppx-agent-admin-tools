@@ -161,6 +161,13 @@
         # and (with -AllEnvironments) some environments are missed.
         MaxPages = 0
 
+        # How many target environments are read/planned/PATCHed concurrently. 0 = default (5). The
+        # licensing API has no bulk endpoint -- every environment still needs its own GET and (with
+        # -Apply) PATCH call, so this is what speeds up a large -AllEnvironments run. Higher values
+        # finish faster but raise the chance of HTTP 429 throttling from the licensing API (already
+        # retried with backoff, so a 429 costs time, not correctness). Requires PowerShell 7+.
+        ThrottleLimit = 0
+
         # Where the CSV report (and its .limitations.txt sidecar) is written. A folder path
         # auto-names a timestamped file into it; a path ending in .csv is used as-is.
         # '' = use the default reports\ folder at the repo root (git-ignored).

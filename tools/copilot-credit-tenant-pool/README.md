@@ -20,7 +20,9 @@ allocation, and `-Apply` combined with `-CreateAllocationIfMissing`) uses the sa
 PATCH call but has not yet been run to completion through this cmdlet — do a small `-Apply` on one or
 two environments first before a tenant-wide apply. The `TenantPoolLockedByPolicy` handling is coded
 from Microsoft's documented behaviour but has not yet been exercised against a live policy-locked
-environment either.
+environment either. The concurrent processing added for `-ThrottleLimit` (see below) has been verified
+against mocked reads/writes but not yet run end-to-end against a live tenant — the same "small `-Apply`
+first" caution applies.
 
 ## What it does
 
@@ -51,7 +53,8 @@ written back unchanged.
 
 ## Prerequisites
 
-- PowerShell 5.1+ or PowerShell 7.x
+- **PowerShell 7.0+** (required for the concurrent per-environment processing — `ForEach-Object
+  -Parallel`). Windows PowerShell 5.1 is no longer supported by this tool.
 - [`Az.Accounts`](https://www.powershellgallery.com/packages/Az.Accounts) module
   (`Install-Module Az.Accounts -Scope CurrentUser`)
 
@@ -103,7 +106,21 @@ Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $false -AllEnvironmen
 # also create an allocation (allocated=0, TenantPool=False) for environments that have none today
 # -- as with every other example, -Apply is what actually writes; omit it for a dry run first
 Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $false -AllEnvironments -CreateAllocationIfMissing -Apply
+
+# process up to 10 environments concurrently instead of the default 5 (large tenants, faster run --
+# raises the chance of HTTP 429 throttling from the licensing API, which is retried automatically)
+Set-PPXCopilotCreditTenantPoolDraw -DrawFromTenantCapacity $false -AllEnvironments -Apply -ThrottleLimit 10
 ```
+
+**`-ThrottleLimit` (default 5).** The licensing API has no bulk/batch endpoint — every environment
+still needs its own `GET` and (with `-Apply`) `PATCH` call. Instead of running those one environment
+at a time, the tool runs up to `-ThrottleLimit` of them concurrently, which is what actually speeds up
+a large `-AllEnvironments` run (e.g. 200+ environments). Raise it for a faster run at a higher chance
+of HTTP 429 responses (already retried with backoff, so a 429 costs time, not correctness); lower it
+(e.g. `1`) to fall back to fully sequential processing. Also settable as
+`CopilotCreditTenantPool.ThrottleLimit` in `ppx.settings.psd1`. **Ignored with `-WhatIf` or
+`-Confirm`** — PowerShell cannot show a `What if:` line or a confirmation prompt from inside a
+parallel runspace, so both always run one environment at a time regardless of `-ThrottleLimit`.
 
 > **`-Apply` is required for every write, every time.** Every example in this README that changes
 > anything (`-CreateAllocationIfMissing` included) needs `-Apply` explicitly on that same call — there
@@ -236,6 +253,9 @@ One row per target environment.
   every row as one quoted field. The reader recovers from that (and from `;`/TAB delimiters, a BOM,
   and an Excel `sep=` line), but trimming the file in a plain-text editor — or opening it in Excel
   with **Data → From Text/CSV** and saving as **CSV UTF-8** — avoids the reshuffle entirely.
+- Target environments are processed concurrently (`-ThrottleLimit`, default 5), so rows in the CSV
+  are no longer in a deterministic order, and a 401 token refresh inside one branch does not
+  propagate to others already in flight (each refreshes independently if it hits one).
 - Every run's specific gaps are restated in the `.limitations.txt` file written alongside the CSV.
 
 ## Security considerations

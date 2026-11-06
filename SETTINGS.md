@@ -126,6 +126,7 @@ that only reads and reports).
 | `TenantId` | string | *(inherits `Common`)* | Override the tenant for just this tool. |
 | `Top` | int | `0` | Inventory API page size for the **environment list** (1–1000; higher is clamped). `0` = default (1000). Does not cap the total — `skipToken` paging retrieves every environment. Only relevant with `-AllEnvironments`. |
 | `MaxPages` | int | `0` | Safety cap on Inventory API pages for the environment list. `0` = no cap. A small value gives a quick partial pull while testing; the list is then flagged **INCOMPLETE** and (with `-AllEnvironments`) some environments are missed. |
+| `ThrottleLimit` | int | `0` | How many target environments are read/planned/PATCHed concurrently. `0` = default (`5`). The licensing API has no bulk endpoint, so this client-side concurrency is what speeds up a large `-AllEnvironments` run; higher values finish faster but raise the chance of HTTP 429 throttling (already retried with backoff). Requires PowerShell 7+. |
 | `OutputPath` | string | `''` | Where the CSV report (+ `.limitations.txt` sidecar) is written. A folder path auto-names a timestamped file; a path ending in `.csv` is used as-is. `''` = the repo-root `reports\` folder (git-ignored). |
 | `ExportReport` | bool | `$true` | Whether to write the CSV report to disk. `$false` = only read and shape the rows in memory. |
 
